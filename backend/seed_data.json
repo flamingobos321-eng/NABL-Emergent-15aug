@@ -1,0 +1,1199 @@
+{
+  "masters": [
+    {
+      "master_id": "YOG-27",
+      "name": "RTD Sensor with Indicator",
+      "manufacturer": "Nishitronics",
+      "model": "RTD-Ref",
+      "serial_number": "YOG-27",
+      "range": "-50 to 400 \u00b0C",
+      "accuracy": "\u00b10.06 \u00b0C",
+      "resolution": "0.01 \u00b0C",
+      "cert_no": "NI2026/01/0148",
+      "cal_date": "2026-01-08",
+      "cal_due_date": "2027-01-08",
+      "traceability": "Nishitronics (NABL)",
+      "uncertainty": 0.06,
+      "status": "active"
+    },
+    {
+      "master_id": "YOG-35",
+      "name": "Reference Indicator",
+      "manufacturer": "Nishitronics",
+      "model": "IND-35",
+      "serial_number": "YOG-35",
+      "range": "-50 to 1200 \u00b0C",
+      "accuracy": "\u00b10.05 \u00b0C",
+      "resolution": "0.01 \u00b0C",
+      "cert_no": "NI2026/01/0148",
+      "cal_date": "2026-01-08",
+      "cal_due_date": "2027-01-08",
+      "traceability": "Nishitronics (NABL)",
+      "uncertainty": 0.05,
+      "status": "active"
+    },
+    {
+      "master_id": "YOG-04",
+      "name": "S-Thermocouple with Indicator",
+      "manufacturer": "Nishitronics",
+      "model": "S-TC",
+      "serial_number": "YOG-04",
+      "range": "0 to 1200 \u00b0C",
+      "accuracy": "\u00b11.021 \u00b0C",
+      "resolution": "0.1 \u00b0C",
+      "cert_no": "NI2026/01/0150",
+      "cal_date": "2026-01-08",
+      "cal_due_date": "2027-01-08",
+      "traceability": "Nishitronics (NABL)",
+      "uncertainty": 1.021,
+      "status": "active"
+    },
+    {
+      "master_id": "YOG-36",
+      "name": "Digital Thermometer",
+      "manufacturer": "Nishitronics",
+      "model": "DT-36",
+      "serial_number": "YOG-36",
+      "range": "-50 to 400 \u00b0C",
+      "accuracy": "\u00b10.48 \u00b0C",
+      "resolution": "0.01 \u00b0C",
+      "cert_no": "NI2026/01/0160",
+      "cal_date": "2026-01-07",
+      "cal_due_date": "2027-01-07",
+      "traceability": "Nishitronics (NABL)",
+      "uncertainty": 0.48,
+      "status": "active"
+    },
+    {
+      "master_id": "YOG-9141",
+      "name": "FLUKE 9141 Dry Well Bath",
+      "manufacturer": "Fluke",
+      "model": "9141",
+      "serial_number": "FLK-9141",
+      "range": "50 to 650 \u00b0C",
+      "accuracy": "\u00b10.2 \u00b0C",
+      "resolution": "0.1 \u00b0C",
+      "cert_no": "INT-9141",
+      "cal_date": "2026-01-10",
+      "cal_due_date": "2027-01-10",
+      "traceability": "Internal stability/uniformity study",
+      "uncertainty": 0.16,
+      "status": "active"
+    },
+    {
+      "master_id": "YOG-9103",
+      "name": "FLUKE 9103 Dry Well Bath",
+      "manufacturer": "Fluke",
+      "model": "9103",
+      "serial_number": "FLK-9103",
+      "range": "-25 to 140 \u00b0C",
+      "accuracy": "\u00b10.1 \u00b0C",
+      "resolution": "0.01 \u00b0C",
+      "cert_no": "INT-9103",
+      "cal_date": "2026-01-10",
+      "cal_due_date": "2027-01-10",
+      "traceability": "Internal stability/uniformity study",
+      "uncertainty": 0.03,
+      "status": "active"
+    }
+  ],
+  "customers": [
+    {
+      "key": "itl",
+      "name": "International Tractors Limited",
+      "address": "Village Chak Gujran, P.O. Piplawala, Jalandhar Road, Hoshiarpur, Punjab-146022",
+      "contact": "Purchase Dept",
+      "email": "quality@itlsonalika.com",
+      "phone": "+91-1882-000000"
+    },
+    {
+      "key": "iasys",
+      "name": "IASYS Technology Solutions Pvt. Ltd.",
+      "address": "Survey No. 253/3, Tirumala Industrial Estate, Hinjewadi, Pune - 411057, Maharashtra, India",
+      "contact": "Calibration Cell",
+      "email": "info@iasys.co.in",
+      "phone": "+91-20-00000000"
+    }
+  ],
+  "products": [
+    {
+      "key": "itl_k",
+      "customer_key": "itl",
+      "name": "Thermocouple (with Laboratory's reference indicator)",
+      "type": "K",
+      "make": "YOG",
+      "range": "0 to 800 \u00b0C",
+      "description": "Type K thermocouple with reference indicator"
+    },
+    {
+      "key": "iasys_rtd",
+      "customer_key": "iasys",
+      "name": "Temperature Sensor (with Laboratory's reference indicator)",
+      "type": "PT-100",
+      "make": "YOG",
+      "range": "0 to 300 \u00b0C",
+      "description": "RTD PT-100 temperature sensor with reference indicator"
+    }
+  ],
+  "templates": [
+    {
+      "code": "K-IND",
+      "name": "Thermocouple K with Indicator",
+      "product_type": "K",
+      "method": "WI \u2013 TECH/11",
+      "reference_standard": "EURAMET cg-8",
+      "components": [
+        {
+          "label": "Unc. in CC of Ref.       u1",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "normal_k2",
+          "estimate": 0.06,
+          "ci": 1.0
+        },
+        {
+          "label": "Unc. in CC of R.O.      u2",
+          "source": "Digital Thermometer (YOG-36)",
+          "distribution": "normal_k2",
+          "estimate": 0.48,
+          "ci": 1.0
+        },
+        {
+          "label": "RSLN of Reference    u3",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "rect_root3",
+          "estimate": 0.01,
+          "ci": 1.0
+        },
+        {
+          "label": "RSLN of DUC            u4",
+          "source": "Digital Thermometer (YOG-36)",
+          "distribution": "rect_root3",
+          "estimate": 0.01,
+          "ci": 1.0
+        },
+        {
+          "label": "Uniformity                  u5",
+          "source": "FLUKE 9141 DWB",
+          "distribution": "rect_root3",
+          "estimate": 0.16,
+          "ci": 1.0
+        },
+        {
+          "label": "Stability                    u6",
+          "source": "FLUKE 9141 DWB",
+          "distribution": "rect_root3",
+          "estimate": 0.07,
+          "ci": 1.0
+        },
+        {
+          "label": "CJC                         u7",
+          "source": "Thermocouple",
+          "distribution": "rect_root3",
+          "estimate": 0.1,
+          "ci": 1.0
+        },
+        {
+          "label": "Variation in CJC         u8",
+          "source": "Thermocouple",
+          "distribution": "rect_root3",
+          "estimate": 0.1,
+          "ci": 1.0
+        },
+        {
+          "label": "In-homogeneity          u9",
+          "source": "Thermocouple",
+          "distribution": "rect_root3",
+          "estimate": 0.12,
+          "ci": 1.0
+        },
+        {
+          "label": "Drift                        u10",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "rect_root3",
+          "estimate": 0.02,
+          "ci": 1.0
+        },
+        {
+          "label": "Due to Repeatabilty  uA",
+          "source": "Type A Measurement Unc",
+          "distribution": "typeA",
+          "estimate": 0.10606601717798146,
+          "ci": 1.0
+        }
+      ]
+    },
+    {
+      "code": "RTD-IND",
+      "name": "RTD (PT-100) with Indicator",
+      "product_type": "PT-100",
+      "method": "WI \u2013 TECH/11",
+      "reference_standard": "DKD-R5-1",
+      "components": [
+        {
+          "label": "Unc. in CC of Ref.      u1",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "normal_k2",
+          "estimate": 0.06,
+          "ci": 1.0
+        },
+        {
+          "label": "Unc. in CC of R.O.     u2",
+          "source": "Digital Thermometer (YOG-36)",
+          "distribution": "normal_k2",
+          "estimate": 0.09,
+          "ci": 1.0
+        },
+        {
+          "label": "RSLN of Reference    u3",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "rect_root3",
+          "estimate": 0.01,
+          "ci": 1.0
+        },
+        {
+          "label": "RSLN of DUC            u4",
+          "source": "Digital Thermometer (YOG-36)",
+          "distribution": "rect_root3",
+          "estimate": 0.01,
+          "ci": 1.0
+        },
+        {
+          "label": "Uniformity of bath      u5",
+          "source": "FLUKE 9103 DWB",
+          "distribution": "rect_root3",
+          "estimate": 0.03,
+          "ci": 1.0
+        },
+        {
+          "label": "Stability of bath         u6",
+          "source": "FLUKE 9103 DWB",
+          "distribution": "rect_root3",
+          "estimate": 0.02,
+          "ci": 1.0
+        },
+        {
+          "label": "Self Heating              u7",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "rect_root3",
+          "estimate": 0.03,
+          "ci": 1.0
+        },
+        {
+          "label": "immersion depth       u8",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "rect_root3",
+          "estimate": 0.05,
+          "ci": 1.0
+        },
+        {
+          "label": "Drift of Reference      u9",
+          "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+          "distribution": "rect_root3",
+          "estimate": 0.019,
+          "ci": 1.0
+        },
+        {
+          "label": "Due to Repeatabilty  uA",
+          "source": "Type A Measurement Unc",
+          "distribution": "typeA",
+          "estimate": 0.007071067811865481,
+          "ci": 1.0
+        }
+      ]
+    }
+  ],
+  "jobs": [
+    {
+      "job_no": "CY/219.03",
+      "customer_key": "itl",
+      "product_key": "itl_k",
+      "serial_number": "26072764",
+      "tag_number": "",
+      "cal_date": "2026-07-31",
+      "issue_date": "2026-08-01",
+      "item_received_date": "2026-07-29",
+      "cert_no": "CY/2607/219.03",
+      "ulr_no": "CC324926000000567F",
+      "method": "WI \u2013 TECH/11",
+      "reference_standard": "EURAMET cg-8",
+      "environmental": {
+        "humidity": "55 \u00b115 % RH",
+        "ambient_temp": "25 \u00b14 \u00b0C"
+      },
+      "master_ids": [
+        "YOG-27",
+        "YOG-35",
+        "YOG-04",
+        "YOG-36",
+        "YOG-9141"
+      ],
+      "template_code": "K-IND",
+      "points": [
+        {
+          "point_label": "100",
+          "nominal": 100.0,
+          "master_readings": [
+            100.14,
+            100.15,
+            100.16,
+            100.15,
+            100.15
+          ],
+          "uut_readings": [
+            99.11,
+            99.02,
+            99.3,
+            99.21,
+            99.13
+          ],
+          "point_deviation": 0.07,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.       u1",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 0.06,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.      u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.48,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference    u3",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC            u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity                  u5",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.16,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability                    u6",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.07,
+              "ci": 1.0
+            },
+            {
+              "label": "CJC                         u7",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.1,
+              "ci": 1.0
+            },
+            {
+              "label": "Variation in CJC         u8",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.1,
+              "ci": 1.0
+            },
+            {
+              "label": "In-homogeneity          u9",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.12,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift                        u10",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.02,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.10606601717798146,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 0.61,
+          "excel_reference": {
+            "std_mean": 100.15,
+            "corrected_std": 100.08,
+            "uut_mean": 99.15,
+            "s_x": 0.10606601717798146,
+            "s_mean": 0.04743416490252539,
+            "combined_unc": 0.28737316042618405,
+            "veff": 5388.647462277227,
+            "expanded_unc": 0.5747463208523681
+          }
+        },
+        {
+          "point_label": "400",
+          "nominal": 400.0,
+          "master_readings": [
+            400.25,
+            400.24,
+            400.25,
+            400.26,
+            400.26
+          ],
+          "uut_readings": [
+            398.51,
+            398.42,
+            398.59,
+            398.72,
+            398.65
+          ],
+          "point_deviation": 0.162,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.       u1",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 0.06,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.      u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.48,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference    u3",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC            u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity                  u5",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.28,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability                    u6",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.07,
+              "ci": 1.0
+            },
+            {
+              "label": "CJC                         u7",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.1,
+              "ci": 1.0
+            },
+            {
+              "label": "Variation in CJC         u8",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.1,
+              "ci": 1.0
+            },
+            {
+              "label": "In-homogeneity          u9",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.12,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift                        u10",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.143,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.11736694594305483,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 0.66,
+          "excel_reference": {
+            "std_mean": 400.252,
+            "corrected_std": 400.09,
+            "uut_mean": 398.58,
+            "s_x": 0.11736694594305483,
+            "s_mean": 0.05248809388804275,
+            "combined_unc": 0.3276756526404324,
+            "veff": 6075.660210224791,
+            "expanded_unc": 0.6553513052808648
+          }
+        },
+        {
+          "point_label": "700",
+          "nominal": 700.0,
+          "master_readings": [
+            700.1,
+            700.2,
+            700.1,
+            700.0,
+            699.8
+          ],
+          "uut_readings": [
+            698.44,
+            698.52,
+            698.38,
+            698.29,
+            698.16
+          ],
+          "point_deviation": -0.39,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.       u1",
+              "source": "S-Thermocouple with Indicator (YOG-04, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 1.0,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.     u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.48,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference    u3",
+              "source": "S-Thermocouple with Indicator (YOG-04, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.1,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC            u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity                 u5",
+              "source": "Calsys 1200",
+              "distribution": "rect_root3",
+              "estimate": 0.57,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability                    u6",
+              "source": "Calsys 1200",
+              "distribution": "rect_root3",
+              "estimate": 0.4,
+              "ci": 1.0
+            },
+            {
+              "label": "CJC                         u7",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.1,
+              "ci": 1.0
+            },
+            {
+              "label": "Variation in CJC       u8",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.1,
+              "ci": 1.0
+            },
+            {
+              "label": "In-homogeneity         u9",
+              "source": "Thermocouple",
+              "distribution": "rect_root3",
+              "estimate": 0.12,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift                          u10",
+              "source": "S-Thermocouple with Indicator (YOG-04, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.233,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.13901438774459715,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 1.63,
+          "excel_reference": {
+            "std_mean": 700.04,
+            "corrected_std": 700.43,
+            "uut_mean": 698.36,
+            "s_x": 0.13901438774459715,
+            "s_mean": 0.06216912416948658,
+            "combined_unc": 0.7113564507333866,
+            "veff": 68566.20161601884,
+            "expanded_unc": 1.4227129014667732
+          }
+        }
+      ]
+    },
+    {
+      "job_no": "CY/212.01",
+      "customer_key": "iasys",
+      "product_key": "iasys_rtd",
+      "serial_number": "26060011",
+      "tag_number": "",
+      "cal_date": "2026-06-03",
+      "issue_date": "2026-06-06",
+      "item_received_date": "2026-06-01",
+      "cert_no": "CY/2606/212.01",
+      "ulr_no": "CC324926000000509F",
+      "method": "WI \u2013 TECH/11",
+      "reference_standard": "DKD-R5-1",
+      "environmental": {
+        "humidity": "55 \u00b115 % RH",
+        "ambient_temp": "25 \u00b14 \u00b0C"
+      },
+      "master_ids": [
+        "YOG-27",
+        "YOG-35",
+        "YOG-36",
+        "YOG-9103"
+      ],
+      "template_code": "RTD-IND",
+      "points": [
+        {
+          "point_label": "00",
+          "nominal": 0.0,
+          "master_readings": [
+            0.01,
+            0.01,
+            0.02,
+            0.02,
+            0.01
+          ],
+          "uut_readings": [
+            0.12,
+            0.13,
+            0.14,
+            0.13,
+            0.13
+          ],
+          "point_deviation": 0.014,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.      u1",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 0.06,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.     u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.09,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference    u3",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC            u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity of bath      u5",
+              "source": "FLUKE 9103 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.03,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability of bath         u6",
+              "source": "FLUKE 9103 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.02,
+              "ci": 1.0
+            },
+            {
+              "label": "Self Heating              u7",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.03,
+              "ci": 1.0
+            },
+            {
+              "label": "immersion depth       u8",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.05,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift of Reference      u9",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.019,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.007071067811865481,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 0.29,
+          "excel_reference": {
+            "std_mean": 0.013999999999999999,
+            "corrected_std": 0.0,
+            "uut_mean": 0.13,
+            "s_x": 0.007071067811865481,
+            "s_mean": 0.003162277660168382,
+            "combined_unc": 0.06847383928674268,
+            "veff": 879343.8044444412,
+            "expanded_unc": 0.13694767857348536
+          }
+        },
+        {
+          "point_label": "50",
+          "nominal": 50.0,
+          "master_readings": [
+            50.07,
+            50.06,
+            50.05,
+            50.06,
+            50.06
+          ],
+          "uut_readings": [
+            50.22,
+            50.21,
+            50.21,
+            50.22,
+            50.23
+          ],
+          "point_deviation": 0.05,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.      u1",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 0.06,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.     u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.09,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference    u3",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC            u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity of bath      u5",
+              "source": "FLUKE 9103 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.04,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability of bath         u6",
+              "source": "FLUKE 9103 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.02,
+              "ci": 1.0
+            },
+            {
+              "label": "Self Heating              u7",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.03,
+              "ci": 1.0
+            },
+            {
+              "label": "immersion depth       u8",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.05,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift of Reference      u9",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.012,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.008660254037842664,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 0.29,
+          "excel_reference": {
+            "std_mean": 50.06,
+            "corrected_std": 50.01,
+            "uut_mean": 50.22,
+            "s_x": 0.008660254037842664,
+            "s_mean": 0.0038729833462066462,
+            "combined_unc": 0.06967543804431128,
+            "veff": 418982.90567934467,
+            "expanded_unc": 0.13935087608862257
+          }
+        },
+        {
+          "point_label": "100",
+          "nominal": 100.0,
+          "master_readings": [
+            100.09,
+            100.07,
+            100.08,
+            100.08,
+            100.09
+          ],
+          "uut_readings": [
+            100.3,
+            100.28,
+            100.29,
+            100.29,
+            100.3
+          ],
+          "point_deviation": 0.062,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.      u1",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 0.06,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.     u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.09,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference   u3",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC             u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity of bath       u5",
+              "source": "FLUKE 9103 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.04,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability of bath           u6",
+              "source": "FLUKE 9103 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.02,
+              "ci": 1.0
+            },
+            {
+              "label": "Self Heating               u7",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.03,
+              "ci": 1.0
+            },
+            {
+              "label": "immersion depth      u8",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.05,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift of Reference      u9",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.02,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.008660254037840612,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 0.29,
+          "excel_reference": {
+            "std_mean": 100.082,
+            "corrected_std": 100.02,
+            "uut_mean": 100.29,
+            "s_x": 0.008660254037840612,
+            "s_mean": 0.0038729833462057286,
+            "combined_unc": 0.07028513356322222,
+            "veff": 433841.77777853183,
+            "expanded_unc": 0.14057026712644444
+          }
+        },
+        {
+          "point_label": "200",
+          "nominal": 200.0,
+          "master_readings": [
+            200.14,
+            200.15,
+            200.13,
+            200.14,
+            200.13
+          ],
+          "uut_readings": [
+            200.4,
+            200.42,
+            200.41,
+            200.4,
+            200.39
+          ],
+          "point_deviation": 0.098,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.      u1",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 0.06,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.     u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.09,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference   u3",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC             u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity of bath       u5",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.19,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability of bath           u6",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.07,
+              "ci": 1.0
+            },
+            {
+              "label": "Self Heating               u7",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.03,
+              "ci": 1.0
+            },
+            {
+              "label": "immersion depth      u8",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.05,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift of Reference      u9",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.056,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.012247448713910553,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 0.61,
+          "excel_reference": {
+            "std_mean": 200.13799999999998,
+            "corrected_std": 200.04,
+            "uut_mean": 200.4,
+            "s_x": 0.012247448713910553,
+            "s_mean": 0.005477225575049274,
+            "combined_unc": 0.13735719857364584,
+            "veff": 1582060.8400027533,
+            "expanded_unc": 0.2747143971472917
+          }
+        },
+        {
+          "point_label": "300",
+          "nominal": 300.0,
+          "master_readings": [
+            300.18,
+            300.19,
+            300.18,
+            300.19,
+            300.2
+          ],
+          "uut_readings": [
+            300.5,
+            300.51,
+            300.5,
+            300.5,
+            300.51
+          ],
+          "point_deviation": 0.118,
+          "components": [
+            {
+              "label": "Unc. in CC of Ref.      u1",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "normal_k2",
+              "estimate": 0.06,
+              "ci": 1.0
+            },
+            {
+              "label": "Unc. in CC of R.O.     u2",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "normal_k2",
+              "estimate": 0.09,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of Reference   u3",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "RSLN of DUC             u4",
+              "source": "Digital Thermometer (YOG-36)",
+              "distribution": "rect_root3",
+              "estimate": 0.01,
+              "ci": 1.0
+            },
+            {
+              "label": "Uniformity of bath       u5",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.23,
+              "ci": 1.0
+            },
+            {
+              "label": "Stability of bath           u6",
+              "source": "FLUKE 9141 DWB",
+              "distribution": "rect_root3",
+              "estimate": 0.07,
+              "ci": 1.0
+            },
+            {
+              "label": "Self Heating               u7",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.03,
+              "ci": 1.0
+            },
+            {
+              "label": "immersion depth      u8",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.05,
+              "ci": 1.0
+            },
+            {
+              "label": "Drift of Reference      u9",
+              "source": "RTD Sensor with Indicator (YOG-27, YOG-35)",
+              "distribution": "rect_root3",
+              "estimate": 0.115,
+              "ci": 1.0
+            },
+            {
+              "label": "Due to Repeatabilty  uA",
+              "source": "Type A Measurement Unc",
+              "distribution": "typeA",
+              "estimate": 0.007071067811859044,
+              "ci": 1.0
+            }
+          ],
+          "cmc_floor": 0.61,
+          "excel_reference": {
+            "std_mean": 300.188,
+            "corrected_std": 300.07,
+            "uut_mean": 300.5,
+            "s_x": 0.007071067811859044,
+            "s_mean": 0.003162277660165503,
+            "combined_unc": 0.16676330531624753,
+            "veff": 30935844.000112545,
+            "expanded_unc": 0.33352661063249506
+          }
+        }
+      ]
+    }
+  ]
+}

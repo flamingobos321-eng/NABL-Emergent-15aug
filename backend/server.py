@@ -1,0 +1,706 @@
+from dotenv import load_dotenv
+from pathlib import Path
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
+import os
+import json
+import uuid
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Any
+
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends
+from fastapi.responses import StreamingResponse
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field, EmailStr
+from bson import ObjectId
+
+import auth as authmod
+import calc as calcmod
+from pdf_gen import build_certificate_pdf
+
+mongo_url = os.environ["MONGO_URL"]
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ["DB_NAME"]]
+
+app = FastAPI(title="YOG Calibration Lab")
+api = APIRouter(prefix="/api")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("yog")
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def oid(x):
+    return str(x)
+
+
+def clean(doc):
+    if not doc:
+        return doc
+    doc = dict(doc)
+    if "_id" in doc:
+        doc["id"] = str(doc.pop("_id"))
+    doc.pop("password_hash", None)
+    return doc
+
+
+# ---------------- Auth dependency / RBAC ----------------
+async def current_user(request: Request):
+    return await authmod.resolve_user(request, db)
+
+
+def require(*roles):
+    async def dep(user=Depends(current_user)):
+        if roles and user["role"] not in roles and user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return dep
+
+
+async def audit(entity_type, entity_id, action, user, field=None, old=None, new=None, reason=None):
+    await db.audit_logs.insert_one({
+        "entity_type": entity_type, "entity_id": str(entity_id), "action": action,
+        "field": field, "old_value": old, "new_value": new, "reason": reason,
+        "user_id": user.get("id"), "user_name": user.get("name"), "user_role": user.get("role"),
+        "timestamp": now_iso(),
+    })
+
+
+# ---------------- Models ----------------
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    role: str = "viewer"
+
+
+class CustomerIn(BaseModel):
+    name: str
+    address: str = ""
+    contact: str = ""
+    email: str = ""
+    phone: str = ""
+
+
+class ProductIn(BaseModel):
+    customer_id: str
+    name: str
+    type: str = ""
+    make: str = ""
+    range: str = ""
+    description: str = ""
+
+
+class MasterIn(BaseModel):
+    master_id: str
+    name: str
+    manufacturer: str = ""
+    model: str = ""
+    serial_number: str = ""
+    range: str = ""
+    accuracy: str = ""
+    resolution: str = ""
+    cert_no: str = ""
+    cal_date: str = ""
+    cal_due_date: str = ""
+    traceability: str = ""
+    uncertainty: float = 0.0
+    status: str = "active"
+
+
+class ComponentIn(BaseModel):
+    label: str
+    source: str = ""
+    distribution: str  # normal_k2 | rect_root3 | typeA
+    estimate: float = 0.0
+    ci: float = 1.0
+
+
+class PointIn(BaseModel):
+    point_label: str
+    nominal: float = 0.0
+    master_readings: List[float] = []
+    uut_readings: List[float] = []
+    point_deviation: float = 0.0
+    components: List[ComponentIn] = []
+    cmc_floor: Optional[float] = None
+    excel_reference: Optional[dict] = None
+
+
+class JobCreate(BaseModel):
+    job_no: str = ""
+    customer_id: str
+    product_id: str
+    serial_number: str = ""
+    tag_number: str = ""
+    cal_date: str = ""
+    issue_date: str = ""
+    item_received_date: str = ""
+    cert_no: str = ""
+    ulr_no: str = ""
+    method: str = "WI \u2013 TECH/11"
+    reference_standard: str = ""
+    environmental: dict = Field(default_factory=lambda: {"humidity": "55 \u00b115 % RH", "ambient_temp": "25 \u00b14 \u00b0C"})
+    master_ids: List[str] = []
+    template_code: str = ""
+    points: List[PointIn] = []
+
+
+class ReadingsUpdate(BaseModel):
+    points: List[PointIn]
+
+
+class ReviewIn(BaseModel):
+    comments: str = ""
+
+
+class RejectIn(BaseModel):
+    reason: str = ""
+
+
+# ---------------- Auth routes ----------------
+def set_cookies(resp, uid, email, role):
+    at = authmod.create_access_token(uid, email, role)
+    rt = authmod.create_refresh_token(uid)
+    resp.set_cookie("access_token", at, httponly=True, secure=True, samesite="none", max_age=43200, path="/")
+    resp.set_cookie("refresh_token", rt, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+    return at
+
+
+@api.post("/auth/login")
+async def login(body: LoginIn, response: Response):
+    email = body.email.lower()
+    user = await db.users.find_one({"email": email})
+    if not user or not authmod.verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = set_cookies(response, str(user["_id"]), email, user["role"])
+    u = clean(user)
+    return {"user": u, "access_token": token}
+
+
+@api.post("/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return {"ok": True}
+
+
+@api.get("/auth/me")
+async def me(user=Depends(current_user)):
+    return user
+
+
+# ---------------- Users ----------------
+@api.get("/users")
+async def list_users(user=Depends(require("admin"))):
+    return [clean(u) for u in await db.users.find().to_list(500)]
+
+
+@api.post("/users")
+async def create_user(body: UserCreate, user=Depends(require("admin"))):
+    if body.role not in authmod.ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if await db.users.find_one({"email": body.email.lower()}):
+        raise HTTPException(status_code=400, detail="Email already exists")
+    doc = {"email": body.email.lower(), "password_hash": authmod.hash_password(body.password),
+           "name": body.name, "role": body.role, "created_at": now_iso()}
+    res = await db.users.insert_one(doc)
+    await audit("user", res.inserted_id, "create", user, new=body.email)
+    return clean(await db.users.find_one({"_id": res.inserted_id}))
+
+
+@api.delete("/users/{uid}")
+async def delete_user(uid: str, user=Depends(require("admin"))):
+    await db.users.delete_one({"_id": ObjectId(uid)})
+    await audit("user", uid, "delete", user)
+    return {"ok": True}
+
+
+# ---------------- Customers & Products ----------------
+@api.get("/customers")
+async def list_customers(user=Depends(current_user)):
+    return [clean(c) for c in await db.customers.find().sort("name", 1).to_list(1000)]
+
+
+@api.post("/customers")
+async def create_customer(body: CustomerIn, user=Depends(require("admin", "technician"))):
+    doc = {**body.model_dump(), "created_at": now_iso()}
+    res = await db.customers.insert_one(doc)
+    await audit("customer", res.inserted_id, "create", user, new=body.name)
+    return clean(await db.customers.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/customers/{cid}")
+async def update_customer(cid: str, body: CustomerIn, user=Depends(require("admin", "technician"))):
+    await db.customers.update_one({"_id": ObjectId(cid)}, {"$set": body.model_dump()})
+    await audit("customer", cid, "update", user)
+    return clean(await db.customers.find_one({"_id": ObjectId(cid)}))
+
+
+@api.get("/products")
+async def list_products(customer_id: Optional[str] = None, user=Depends(current_user)):
+    q = {"customer_id": customer_id} if customer_id else {}
+    return [clean(p) for p in await db.products.find(q).to_list(1000)]
+
+
+@api.post("/products")
+async def create_product(body: ProductIn, user=Depends(require("admin", "technician"))):
+    doc = {**body.model_dump(), "created_at": now_iso()}
+    res = await db.products.insert_one(doc)
+    await audit("product", res.inserted_id, "create", user, new=body.name)
+    return clean(await db.products.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/products/{pid}")
+async def update_product(pid: str, body: ProductIn, user=Depends(require("admin", "technician"))):
+    await db.products.update_one({"_id": ObjectId(pid)}, {"$set": body.model_dump()})
+    await audit("product", pid, "update", user)
+    return clean(await db.products.find_one({"_id": ObjectId(pid)}))
+
+
+# ---------------- Masters ----------------
+def master_status(m):
+    due = m.get("cal_due_date")
+    if not due:
+        return "unknown"
+    try:
+        d = datetime.fromisoformat(due[:10]).date()
+    except Exception:
+        return "unknown"
+    today = datetime.now(timezone.utc).date()
+    if d < today:
+        return "expired"
+    if (d - today).days <= 30:
+        return "expiring"
+    return "valid"
+
+
+@api.get("/masters")
+async def list_masters(user=Depends(current_user)):
+    out = []
+    for m in await db.masters.find().sort("master_id", 1).to_list(1000):
+        c = clean(m)
+        c["validity_status"] = master_status(m)
+        out.append(c)
+    return out
+
+
+@api.post("/masters")
+async def create_master(body: MasterIn, user=Depends(require("admin", "technician"))):
+    doc = {**body.model_dump(), "created_at": now_iso()}
+    res = await db.masters.insert_one(doc)
+    await audit("master", res.inserted_id, "create", user, new=body.master_id)
+    return clean(await db.masters.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/masters/{mid}")
+async def update_master(mid: str, body: MasterIn, user=Depends(require("admin", "technician"))):
+    old = await db.masters.find_one({"_id": ObjectId(mid)})
+    await db.masters.update_one({"_id": ObjectId(mid)}, {"$set": body.model_dump()})
+    await audit("master", mid, "update", user, old=(old or {}).get("cal_due_date"), new=body.cal_due_date)
+    return clean(await db.masters.find_one({"_id": ObjectId(mid)}))
+
+
+# ---------------- Templates ----------------
+@api.get("/templates")
+async def list_templates(user=Depends(current_user)):
+    return [clean(t) for t in await db.templates.find().to_list(100)]
+
+
+# ---------------- Jobs ----------------
+async def hydrate_standards(master_ids):
+    stds = []
+    for mid in master_ids:
+        m = await db.masters.find_one({"master_id": mid})
+        if m:
+            stds.append({
+                "name": m["name"], "uncertainty": m.get("uncertainty", 0),
+                "id_no": m.get("master_id", ""), "certified_by": m.get("traceability", ""),
+                "report_no": m.get("cert_no", ""), "validity": m.get("cal_due_date", ""),
+            })
+    return stds
+
+
+def next_cal_date(cal_date):
+    try:
+        d = datetime.fromisoformat(cal_date[:10])
+        return (d + timedelta(days=364)).date().isoformat()
+    except Exception:
+        return ""
+
+
+@api.get("/jobs")
+async def list_jobs(user=Depends(current_user)):
+    out = []
+    for j in await db.jobs.find().sort("created_at", -1).to_list(1000):
+        c = clean(j)
+        cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
+        prod = await db.products.find_one({"_id": ObjectId(c["product_id"])}) if c.get("product_id") else None
+        c["customer_name"] = cust["name"] if cust else ""
+        c["product_name"] = prod["name"] if prod else ""
+        out.append(c)
+    return out
+
+
+@api.get("/jobs/{jid}")
+async def get_job(jid: str, user=Depends(current_user)):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    c = clean(j)
+    cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
+    prod = await db.products.find_one({"_id": ObjectId(c["product_id"])}) if c.get("product_id") else None
+    c["customer"] = clean(cust) if cust else None
+    c["product"] = clean(prod) if prod else None
+    return c
+
+
+@api.post("/jobs")
+async def create_job(body: JobCreate, user=Depends(require("admin", "technician"))):
+    doc = body.model_dump()
+    doc["standards_used"] = await hydrate_standards(body.master_ids)
+    doc["recommended_next_date"] = next_cal_date(body.cal_date)
+    doc["status"] = "draft"
+    doc["technician_id"] = user["id"]
+    doc["technician_name"] = user["name"]
+    doc["created_by"] = user["id"]
+    doc["created_at"] = now_iso()
+    doc["review"] = None
+    doc["approval"] = None
+    doc["certificate"] = None
+    res = await db.jobs.insert_one(doc)
+    await audit("job", res.inserted_id, "create", user, new=body.job_no)
+    return clean(await db.jobs.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/jobs/{jid}/readings")
+async def update_readings(jid: str, body: ReadingsUpdate, user=Depends(require("admin", "technician"))):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if j.get("status") in ("approved", "certified"):
+        raise HTTPException(status_code=400, detail="Job is locked after approval")
+    old_points = j.get("points", [])
+    new_points = [p.model_dump() for p in body.points]
+    # audit changed readings
+    for i, np in enumerate(new_points):
+        op = old_points[i] if i < len(old_points) else {}
+        if op.get("master_readings") != np.get("master_readings"):
+            await audit("job", jid, "reading_change", user, field=f"point[{i}].master_readings",
+                        old=op.get("master_readings"), new=np.get("master_readings"))
+        if op.get("uut_readings") != np.get("uut_readings"):
+            await audit("job", jid, "reading_change", user, field=f"point[{i}].uut_readings",
+                        old=op.get("uut_readings"), new=np.get("uut_readings"))
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"points": new_points, "status": "readings_entered"}})
+    return clean(await db.jobs.find_one({"_id": ObjectId(jid)}))
+
+
+def compute_job(job):
+    points = job.get("points", [])
+    results = []
+    all_pass = True
+    for p in points:
+        r = calcmod.compute_point(
+            p["master_readings"], p["uut_readings"], p.get("point_deviation", 0.0),
+            p["components"], p.get("cmc_floor"),
+        )
+        results.append({
+            "point_label": p.get("point_label"), "nominal": p.get("nominal"),
+            "master_readings": p["master_readings"], "uut_readings": p["uut_readings"],
+            "point_deviation": p.get("point_deviation", 0.0),
+            "cmc_floor": p.get("cmc_floor"), "components": p["components"],
+            "results": r,
+        })
+    return results
+
+
+@api.post("/jobs/{jid}/calculate")
+async def calculate(jid: str, user=Depends(current_user)):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    results = compute_job(j)
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"computed": results, "status": "calculated"}})
+    return {"results": results}
+
+
+@api.post("/jobs/{jid}/submit-review")
+async def submit_review(jid: str, user=Depends(require("admin", "technician"))):
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"status": "in_review"}})
+    await audit("job", jid, "submit_review", user)
+    return {"ok": True}
+
+
+@api.post("/jobs/{jid}/review")
+async def review(jid: str, body: ReviewIn, user=Depends(require("admin", "reviewer"))):
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {
+        "status": "reviewed",
+        "review": {"reviewer_id": user["id"], "reviewer_name": user["name"], "date": now_iso(), "comments": body.comments},
+    }})
+    await audit("job", jid, "review", user, reason=body.comments)
+    return {"ok": True}
+
+
+@api.post("/jobs/{jid}/reject")
+async def reject(jid: str, body: RejectIn, user=Depends(require("admin", "reviewer", "signatory"))):
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"status": "rejected", "reject_reason": body.reason}})
+    await audit("job", jid, "reject", user, reason=body.reason)
+    return {"ok": True}
+
+
+@api.post("/jobs/{jid}/approve")
+async def approve(jid: str, user=Depends(require("admin", "signatory"))):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # validate masters
+    for mid in j.get("master_ids", []):
+        m = await db.masters.find_one({"master_id": mid})
+        if m and master_status(m) == "expired":
+            raise HTTPException(status_code=400, detail=f"Master {mid} calibration expired; cannot approve")
+    verify_id = uuid.uuid4().hex[:12]
+    cert = {
+        "cert_no": j.get("cert_no"), "ulr_no": j.get("ulr_no"),
+        "verification_id": verify_id, "issued_date": now_iso(),
+        "issued_by": user["name"], "status": "issued",
+    }
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {
+        "status": "certified",
+        "approval": {"signatory_id": user["id"], "signatory_name": user["name"], "date": now_iso()},
+        "certificate": cert,
+    }})
+    await audit("job", jid, "approve_certify", user, new=verify_id)
+    return {"ok": True, "certificate": cert}
+
+
+@api.post("/jobs/{jid}/cancel-certificate")
+async def cancel_cert(jid: str, body: RejectIn, user=Depends(require("admin", "signatory"))):
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"certificate.status": "cancelled", "certificate.cancel_reason": body.reason}})
+    await audit("job", jid, "cancel_certificate", user, reason=body.reason)
+    return {"ok": True}
+
+
+@api.get("/jobs/{jid}/certificate/pdf")
+async def cert_pdf(jid: str, user=Depends(current_user)):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j or not j.get("certificate"):
+        raise HTTPException(status_code=404, detail="Certificate not issued")
+    cust = await db.customers.find_one({"_id": ObjectId(j["customer_id"])})
+    prod = await db.products.find_one({"_id": ObjectId(j["product_id"])})
+    results = compute_job(j)
+    verify_url = f"{os.environ.get('FRONTEND_URL','')}/verify/{j['certificate']['verification_id']}"
+    pdf = build_certificate_pdf(j, clean(cust), clean(prod), results, verify_url)
+    return StreamingResponse(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="certificate_{j.get("cert_no","cert").replace("/","_")}.pdf"'})
+
+
+# ---------------- Excel vs App validation ----------------
+@api.get("/jobs/{jid}/validation")
+async def validation(jid: str, user=Depends(current_user)):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    rows = []
+    has_ref = False
+    for p in j.get("points", []):
+        ref = p.get("excel_reference")
+        r = calcmod.compute_point(p["master_readings"], p["uut_readings"], p.get("point_deviation", 0.0),
+                                  p["components"], p.get("cmc_floor"))
+        params = [
+            ("Corrected STD (°C)", "corrected_std", r["corrected_std"]),
+            ("Measured (Xbar) (°C)", "uut_mean", r["uut_mean"]),
+            ("Deviation (°C)", None, r["deviation"]),
+            ("Std Dev s(x)", "s_x", r["s_x"]),
+            ("Combined Unc Uc", "combined_unc", r["combined_unc"]),
+            ("Veff", "veff", r["veff"]),
+            ("Expanded Unc U", "expanded_unc", r["expanded_unc"]),
+        ]
+        for label, key, appval in params:
+            excelval = ref.get(key) if (ref and key) else None
+            if excelval is not None:
+                has_ref = True
+                diff = abs(appval - excelval)
+                tol = 1e-6 * max(1, abs(excelval))
+                status = "PASS" if diff <= tol else "FAIL"
+            else:
+                diff = None
+                status = "N/A"
+            rows.append({"point": p.get("point_label"), "parameter": label,
+                         "excel": excelval, "application": appval,
+                         "difference": diff, "status": status})
+    return {"has_reference": has_ref, "rows": rows}
+
+
+# ---------------- Dashboard ----------------
+@api.get("/dashboard")
+async def dashboard(user=Depends(current_user)):
+    jobs = await db.jobs.find().to_list(2000)
+    masters = await db.masters.find().to_list(1000)
+    today = datetime.now(timezone.utc).date().isoformat()
+    counts = {"pending_readings": 0, "pending_review": 0, "pending_approval": 0,
+              "certificates_issued": 0, "today_jobs": 0}
+    for j in jobs:
+        s = j.get("status")
+        if s in ("draft", "readings_entered"):
+            counts["pending_readings"] += 1
+        if s in ("in_review",):
+            counts["pending_review"] += 1
+        if s in ("reviewed", "calculated"):
+            counts["pending_approval"] += 1
+        if s == "certified":
+            counts["certificates_issued"] += 1
+        if (j.get("cal_date") or "")[:10] == today:
+            counts["today_jobs"] += 1
+    expiring, expired = [], []
+    for m in masters:
+        st = master_status(m)
+        if st == "expiring":
+            expiring.append(clean(m))
+        elif st == "expired":
+            expired.append(clean(m))
+    recent = []
+    for j in sorted(jobs, key=lambda x: x.get("created_at", ""), reverse=True)[:8]:
+        c = clean(j)
+        cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
+        c["customer_name"] = cust["name"] if cust else ""
+        recent.append({"id": c["id"], "job_no": c.get("job_no"), "customer_name": c["customer_name"],
+                       "status": c.get("status"), "cal_date": c.get("cal_date")})
+    counts["masters_expiring"] = len(expiring)
+    counts["masters_expired"] = len(expired)
+    return {"counts": counts, "expiring_masters": expiring, "expired_masters": expired, "recent_jobs": recent}
+
+
+# ---------------- Audit ----------------
+@api.get("/audit")
+async def get_audit(entity_id: Optional[str] = None, user=Depends(current_user)):
+    q = {"entity_id": entity_id} if entity_id else {}
+    logs = await db.audit_logs.find(q).sort("timestamp", -1).to_list(500)
+    return [clean(l) for l in logs]
+
+
+# ---------------- Public verification ----------------
+@api.get("/verify/{verification_id}")
+async def verify(verification_id: str):
+    j = await db.jobs.find_one({"certificate.verification_id": verification_id})
+    if not j:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    cert = j.get("certificate", {})
+    prod = await db.products.find_one({"_id": ObjectId(j["product_id"])}) if j.get("product_id") else None
+    return {
+        "found": True,
+        "certificate_no": cert.get("cert_no"),
+        "ulr_no": cert.get("ulr_no"),
+        "status": cert.get("status"),
+        "issued_date": cert.get("issued_date"),
+        "cal_date": j.get("cal_date"),
+        "recommended_next_date": j.get("recommended_next_date"),
+        "item": prod["name"] if prod else "",
+        "item_type": prod.get("type") if prod else "",
+        "serial_number": j.get("serial_number"),
+        "points": len(j.get("points", [])),
+    }
+
+
+@api.get("/")
+async def root():
+    return {"service": "YOG Calibration Lab API", "status": "ok"}
+
+
+app.include_router(api)
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------- Seeding ----------------
+async def seed():
+    await db.users.create_index("email", unique=True)
+    await db.masters.create_index("master_id")
+    admin_email = os.environ["ADMIN_EMAIL"].lower()
+    admin_pw = os.environ["ADMIN_PASSWORD"]
+    existing = await db.users.find_one({"email": admin_email})
+    if not existing:
+        await db.users.insert_one({"email": admin_email, "password_hash": authmod.hash_password(admin_pw),
+                                   "name": "Lab Administrator", "role": "admin", "created_at": now_iso()})
+    elif not authmod.verify_password(admin_pw, existing["password_hash"]):
+        await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": authmod.hash_password(admin_pw)}})
+
+    # demo users for each role
+    demo = [("technician@yog.local", "Tech@2026", "Nilesh Bodakhe", "technician"),
+            ("reviewer@yog.local", "Review@2026", "Quality Reviewer", "reviewer"),
+            ("signatory@yog.local", "Sign@2026", "A. A. Kothe", "signatory"),
+            ("viewer@yog.local", "View@2026", "Read Only", "viewer")]
+    for em, pw, nm, role in demo:
+        if not await db.users.find_one({"email": em}):
+            await db.users.insert_one({"email": em, "password_hash": authmod.hash_password(pw),
+                                       "name": nm, "role": role, "created_at": now_iso()})
+
+    if await db.jobs.count_documents({}) > 0:
+        return  # already seeded
+
+    with open(ROOT_DIR / "seed_data.json") as f:
+        data = json.load(f)
+
+    for m in data["masters"]:
+        if not await db.masters.find_one({"master_id": m["master_id"]}):
+            await db.masters.insert_one({**m, "created_at": now_iso()})
+
+    cust_map = {}
+    for c in data["customers"]:
+        key = c.pop("key")
+        res = await db.customers.insert_one({**c, "created_at": now_iso()})
+        cust_map[key] = str(res.inserted_id)
+
+    prod_map = {}
+    for p in data["products"]:
+        key = p.pop("key")
+        ckey = p.pop("customer_key")
+        p["customer_id"] = cust_map[ckey]
+        res = await db.products.insert_one({**p, "created_at": now_iso()})
+        prod_map[key] = str(res.inserted_id)
+
+    for t in data["templates"]:
+        if not await db.templates.find_one({"code": t["code"]}):
+            await db.templates.insert_one({**t, "created_at": now_iso()})
+
+    for j in data["jobs"]:
+        ckey = j.pop("customer_key")
+        pkey = j.pop("product_key")
+        j["customer_id"] = cust_map[ckey]
+        j["product_id"] = prod_map[pkey]
+        j["standards_used"] = await hydrate_standards(j.get("master_ids", []))
+        j["recommended_next_date"] = next_cal_date(j.get("cal_date", ""))
+        j["status"] = "readings_entered"
+        j["technician_name"] = "Nilesh Bodakhe"
+        j["review"] = None
+        j["approval"] = None
+        j["certificate"] = None
+        j["created_at"] = now_iso()
+        await db.jobs.insert_one(j)
+
+    logger.info("Seed complete")
+
+
+@app.on_event("startup")
+async def startup():
+    await seed()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    client.close()

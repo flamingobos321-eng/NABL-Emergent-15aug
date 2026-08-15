@@ -1,0 +1,48 @@
+{
+  "summary": "Ran comprehensive backend pytest suite (19 tests, all PASS) covering auth for all 5 roles, dashboard, seeded jobs, Excel-vs-App validation (has_reference=true, 0 FAIL for BOTH CY/219.03 and CY/212.01 - proves calc engine matches Excel exactly), calculation endpoint, full workflow (submit-review -> review -> approve -> PDF -> public verify), RBAC enforcement (viewer 403 on writes, reviewer 403 on approve, technician can create), audit trail of reading changes, masters validity. Verified frontend loads: login, dashboard stats + recent jobs + master validity widget render; Jobs list shows 2 seeded rows; JobDetail tabs (Overview/Readings/Calculation/Excel vs App/Certificate/Audit) render; Validation tab renders 35 rows for CY/212.01 (5 points x 7 params); Calculation tab shows 5 calc-point cards; navigation to Masters works. Public /verify endpoint correctly omits customer name/address. Certificate PDF is a valid PDF (%PDF header, application/pdf). Fixed one critical login bug during testing (see updated_files).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/auth/login", "issue": "FIXED. LoginIn used pydantic EmailStr which REJECTS the demo domain '@yog.local' (reserved TLD) - returned 422 for technician/reviewer/signatory/viewer, meaning 4 of 5 demo users could NOT log in at all. Changed EmailStr -> str in server.py. Root cause: pydantic email_validator treats .local as special-use reserved TLD. Long-term either use different demo domain (e.g., @yog.test - actually also reserved; use @example.com) or keep permissive str. Currently permissive.", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/jobs", "issue": "Bug: server.py line 381 calls `body.job_no` in audit() but JobCreate model has NO job_no field. Creating a job via POST /api/jobs will raise AttributeError (500). Frontend NewJob.jsx must currently work around this or the endpoint never worked. Add `job_no: str = \"\"` to JobCreate.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "PUT /api/jobs/{id}/readings", "issue": "ReadingsUpdate/PointIn does not include `excel_reference`, so any technician readings edit STRIPS the seeded excel_reference ground-truth from a point (pydantic drops unknown fields). Observed: audit test edited CY/212.01 readings; validation subsequently returns has_reference=false. Not a prod issue for real jobs (which never have excel_reference), but preserves stored reference by using $set on specific fields or by carrying excel_reference through PointIn."},
+      {"endpoint": "POST /api/jobs/{id}/approve", "issue": "Approval is irreversible per spec; no cancel/rejection path after certification other than certificate cancellation. Confirmed behavior; documented."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "JobDetail > Excel vs App", "issues": ["When excel_reference is absent, the 'Excel' and 'Difference' columns render em-dashes and status N/A - acceptable, but consider hiding the table or showing a clearer banner (currently shows 'No Excel reference values stored for this job.' - good)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add `job_no: str = ''` (and any other required fields) to JobCreate model in /app/backend/server.py to fix POST /api/jobs (currently would raise AttributeError on audit call).",
+    "Decide long-term auth: revert email: str -> EmailStr and change demo user emails away from .local (e.g., @example.com), OR keep permissive str validation. Test agent chose permissive str to unblock demo credentials from problem statement.",
+    "Optional: preserve excel_reference on PUT /readings so the Excel-vs-App comparison survives readings edits."
+  ],
+  "critical_code_review_comments": [
+    "server.py line 381 references undefined body.job_no - latent 500 on job creation.",
+    "PointIn used both for create AND readings-update means updates silently strip fields like excel_reference; consider separate ReadingPointIn.",
+    "compute_job is called on every /validation and /certificate/pdf request - fine for MVP but heavy for long point lists; consider caching last computed result.",
+    "clean() strips password_hash but does not strip other sensitive fields (e.g., audit reason on certificate cancel is exposed via public verify? No - verify() constructs response manually, OK).",
+    "seed() runs on startup; safe reseed logic gated by db.jobs.count_documents({}) > 0 - correct.",
+    "JWT set via cookies (httpOnly, secure, samesite=none) AND access_token in response - good for dual bearer/cookie use."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (LoginIn.email: EmailStr -> str to allow .local demo emails)",
+    "/app/backend/tests/backend_test.py (new comprehensive pytest suite)"
+  ],
+  "success_rate": {"backend": "100% (19/19 pytest passing after login fix)", "frontend": "100% of core flows rendered/navigated successfully"},
+  "test_credentials": "Admin mbhashik@gmail.com/Yog@Admin2026; technician@yog.local/Tech@2026; reviewer@yog.local/Review@2026; signatory@yog.local/Sign@2026; viewer@yog.local/View@2026. All working AFTER EmailStr->str fix.",
+  "seed_data_creation": "Test created one customer 'TEST_TechCust' via RBAC test; not cleaned up (id not tracked). No other persistent test data. Note: workflow test irreversibly approved & certified ONE of the seeded jobs (varies which one) and audit test mutated readings on the other (then restored, but excel_reference was stripped by PointIn model). Both seeded jobs are consumed by this test run - recommend re-seeding DB before UI demo (drop db.jobs collection and restart backend to re-seed).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/backend_test.py runs against public URL via REACT_APP_BACKEND_URL. All 19 tests pass. After this test run, one seeded job is certified and the other's excel_reference is stripped (both side-effects of the workflow+audit tests). If retesting validation from a clean state, drop db.jobs and restart backend to reseed. LoginIn was changed to email: str (not EmailStr) because demo users use .local TLD which pydantic rejects - if main agent reverts, update demo emails too. JobCreate is MISSING job_no field even though seed_data.json and audit both use it - this is the biggest lurking bug (POST /api/jobs will 500).",
+  "rca of the issue": "Login 422 for demo users: pydantic EmailStr uses email_validator which rejects reserved TLDs like .local per RFC 2606. Fix applied by changing to plain str; alternate is to use a non-reserved TLD for demo accounts. Reproduction: POST /api/auth/login with {email:'technician@yog.local'} -> 422. Mitigation done in server.py."
+}
