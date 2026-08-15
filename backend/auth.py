@@ -8,7 +8,7 @@ from bson import ObjectId
 
 JWT_ALGORITHM = "HS256"
 
-ROLES = ["admin", "technician", "reviewer", "signatory", "viewer"]
+ROLES = ["admin", "technician", "reviewer", "signatory", "quality", "viewer"]
 
 
 def hash_password(password: str) -> str:

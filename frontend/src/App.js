@@ -10,9 +10,7 @@ import Masters from "@/pages/Masters";
 import Jobs from "@/pages/Jobs";
 import JobDetail from "@/pages/JobDetail";
 import NewJob from "@/pages/NewJob";
-import WorkOrders from "@/pages/WorkOrders";
-import NewWorkOrder from "@/pages/NewWorkOrder";
-import WorkOrderDetail from "@/pages/WorkOrderDetail";
+import Documents from "@/pages/Documents";
 import SrfPublic from "@/pages/SrfPublic";
 import Users from "@/pages/Users";
 import Audit from "@/pages/Audit";
@@ -40,6 +38,7 @@ function App() {
             <Route path="/" element={<Protected><Dashboard /></Protected>} />
             <Route path="/customers" element={<Protected><Customers /></Protected>} />
             <Route path="/masters" element={<Protected><Masters /></Protected>} />
+            <Route path="/documents" element={<Protected><Documents /></Protected>} />
             <Route path="/jobs" element={<Protected><Jobs /></Protected>} />
             <Route path="/jobs/new" element={<Protected><NewJob /></Protected>} />
             <Route path="/jobs/:id" element={<Protected><JobDetail /></Protected>} />

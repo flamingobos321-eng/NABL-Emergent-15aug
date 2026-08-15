@@ -45,5 +45,6 @@ export const ROLE_LABELS = {
   technician: "Technician",
   reviewer: "Reviewer",
   signatory: "Authorized Signatory",
+  quality: "Quality Manager",
   viewer: "Viewer",
 };

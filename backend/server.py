@@ -185,6 +185,25 @@ class SRFAction(BaseModel):
     comments: str = ""
 
 
+class DocumentIn(BaseModel):
+    doc_number: str
+    title: str
+    category: str
+    revision: str = "01"
+    effective_date: str = ""
+    review_date: str = ""
+    prepared_by: str = ""
+    reviewed_by: str = ""
+    approved_by: str = ""
+    file_url: str = ""
+    change_note: str = ""
+
+
+class DocStatusIn(BaseModel):
+    status: str = ""
+    note: str = ""
+
+
 # ---------------- Auth routes ----------------
 def set_cookies(resp, uid, email, role):
     at = authmod.create_access_token(uid, email, role)
@@ -802,6 +821,106 @@ async def traceability(jid: str, user=Depends(current_user)):
     }
 
 
+# ---------------- Document Control ----------------
+DOC_CATEGORIES = [
+    "Quality Manual", "SOP", "Calibration Procedure", "Work Instruction", "Form",
+    "Calculation Method", "Uncertainty Procedure", "Equipment Procedure",
+    "Environmental Procedure", "Certificate Template", "Policy",
+]
+DOC_STATUS_FLOW = {"draft": "under_review", "under_review": "approved", "approved": "effective"}
+
+
+@api.get("/documents")
+async def list_documents(category: Optional[str] = None, status: Optional[str] = None, user=Depends(current_user)):
+    q = {}
+    if category:
+        q["category"] = category
+    if status:
+        q["status"] = status
+    docs = await db.documents.find(q).sort([("category", 1), ("doc_number", 1), ("revision", -1)]).to_list(2000)
+    return [clean(d) for d in docs]
+
+
+@api.post("/documents")
+async def create_document(body: DocumentIn, user=Depends(require("admin", "quality"))):
+    if await db.documents.find_one({"doc_number": body.doc_number, "revision": body.revision}):
+        raise HTTPException(status_code=400, detail="This document number + revision already exists")
+    doc = {**body.model_dump(), "status": "draft", "is_current": False, "superseded_by": None,
+           "created_by": user["id"], "created_by_name": user["name"],
+           "created_at": now_iso(), "updated_at": now_iso(),
+           "history": [{"action": "created", "by": user["name"], "at": now_iso(), "note": body.change_note}]}
+    res = await db.documents.insert_one(doc)
+    await audit("document", res.inserted_id, "create", user, new=f"{body.doc_number} rev {body.revision}")
+    return clean(await db.documents.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/documents/{did}")
+async def update_document(did: str, body: DocumentIn, user=Depends(require("admin", "quality"))):
+    d = await db.documents.find_one({"_id": ObjectId(did)})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if d["status"] in ("effective", "obsolete"):
+        raise HTTPException(status_code=400, detail="Effective/obsolete documents cannot be edited — create a new revision")
+    await db.documents.update_one({"_id": ObjectId(did)}, {"$set": {**body.model_dump(), "updated_at": now_iso()}})
+    await audit("document", did, "update", user)
+    return clean(await db.documents.find_one({"_id": ObjectId(did)}))
+
+
+@api.post("/documents/{did}/status")
+async def transition_document(did: str, body: DocStatusIn, user=Depends(require("admin", "quality"))):
+    d = await db.documents.find_one({"_id": ObjectId(did)})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    target = body.status
+    if target not in ("under_review", "approved", "effective", "obsolete"):
+        raise HTTPException(status_code=400, detail="Invalid target status")
+    updates = {"status": target, "updated_at": now_iso()}
+    if target == "effective":
+        updates["is_current"] = True
+        if not d.get("effective_date"):
+            updates["effective_date"] = now_iso()[:10]
+        await db.documents.update_many(
+            {"doc_number": d["doc_number"], "status": "effective", "_id": {"$ne": ObjectId(did)}},
+            {"$set": {"status": "obsolete", "is_current": False, "superseded_by": d.get("revision")}})
+    await db.documents.update_one({"_id": ObjectId(did)}, {
+        "$set": updates,
+        "$push": {"history": {"action": f"status → {target}", "by": user["name"], "at": now_iso(), "note": body.note}}})
+    await audit("document", did, "status_change", user, old=d.get("status"), new=target, reason=body.note)
+    return clean(await db.documents.find_one({"_id": ObjectId(did)}))
+
+
+@api.post("/documents/{did}/revise")
+async def revise_document(did: str, body: DocStatusIn, user=Depends(require("admin", "quality"))):
+    d = await db.documents.find_one({"_id": ObjectId(did)})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        nextrev = f"{int(d.get('revision', '01')) + 1:02d}"
+    except ValueError:
+        nextrev = f"{d.get('revision', '01')}-R"
+    if await db.documents.find_one({"doc_number": d["doc_number"], "revision": nextrev}):
+        raise HTTPException(status_code=400, detail="Next revision already exists")
+    newdoc = {"doc_number": d["doc_number"], "title": d.get("title", ""), "category": d.get("category", ""),
+              "file_url": d.get("file_url", ""), "revision": nextrev, "status": "draft",
+              "is_current": False, "superseded_by": None, "effective_date": "", "review_date": "",
+              "prepared_by": user["name"], "reviewed_by": "", "approved_by": "", "change_note": body.note or "",
+              "created_by": user["id"], "created_by_name": user["name"],
+              "created_at": now_iso(), "updated_at": now_iso(),
+              "history": [{"action": f"new revision from rev {d.get('revision')}", "by": user["name"], "at": now_iso(), "note": body.note}]}
+    res = await db.documents.insert_one(newdoc)
+    await audit("document", res.inserted_id, "revise", user, old=d.get("revision"), new=nextrev)
+    return clean(await db.documents.find_one({"_id": res.inserted_id}))
+
+
+@api.get("/documents/{did}/history")
+async def document_history(did: str, user=Depends(current_user)):
+    d = await db.documents.find_one({"_id": ObjectId(did)})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    revs = await db.documents.find({"doc_number": d["doc_number"]}).sort("revision", 1).to_list(200)
+    return {"doc_number": d["doc_number"], "revisions": [clean(x) for x in revs]}
+
+
 # ---------------- Public verification ----------------
 @api.get("/verify/{verification_id}")
 async def verify(verification_id: str):
@@ -860,11 +979,25 @@ async def seed():
     demo = [("technician@yog.local", "Tech@2026", "Nilesh Bodakhe", "technician"),
             ("reviewer@yog.local", "Review@2026", "Quality Reviewer", "reviewer"),
             ("signatory@yog.local", "Sign@2026", "A. A. Kothe", "signatory"),
+            ("quality@yog.local", "Quality@2026", "Quality Manager", "quality"),
             ("viewer@yog.local", "View@2026", "Read Only", "viewer")]
     for em, pw, nm, role in demo:
         if not await db.users.find_one({"email": em}):
             await db.users.insert_one({"email": em, "password_hash": authmod.hash_password(pw),
                                        "name": nm, "role": role, "created_at": now_iso()})
+
+    if await db.documents.count_documents({}) == 0:
+        samples = [
+            {"doc_number": "QM-01", "title": "Quality Manual", "category": "Quality Manual", "revision": "03", "status": "effective", "effective_date": "2026-01-01", "review_date": "2027-01-01", "prepared_by": "Quality Manager", "reviewed_by": "Technical Manager", "approved_by": "Lab Director"},
+            {"doc_number": "WI-TECH/11", "title": "Temperature Calibration Work Instruction", "category": "Work Instruction", "revision": "05", "status": "effective", "effective_date": "2026-02-01", "review_date": "2027-02-01", "prepared_by": "N. H. Bodakhe", "reviewed_by": "A. A. Kothe", "approved_by": "A. A. Kothe"},
+            {"doc_number": "FTECH04", "title": "Calibration Certificate Template", "category": "Certificate Template", "revision": "05", "status": "effective", "effective_date": "2026-02-01", "review_date": "2027-02-01", "prepared_by": "Quality Manager", "reviewed_by": "", "approved_by": "A. A. Kothe"},
+            {"doc_number": "FTECH22", "title": "Uncertainty Calculation Procedure", "category": "Uncertainty Procedure", "revision": "00", "status": "under_review", "effective_date": "", "review_date": "", "prepared_by": "N. H. Bodakhe", "reviewed_by": "", "approved_by": ""},
+        ]
+        for s in samples:
+            await db.documents.insert_one({**s, "file_url": "", "change_note": "",
+                "is_current": s["status"] == "effective", "superseded_by": None, "created_by_name": "System",
+                "created_at": now_iso(), "updated_at": now_iso(),
+                "history": [{"action": "seeded", "by": "System", "at": now_iso(), "note": ""}]})
 
     if await db.jobs.count_documents({}) > 0:
         return  # already seeded

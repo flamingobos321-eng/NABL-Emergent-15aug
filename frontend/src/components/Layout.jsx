@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import {
   LayoutDashboard, Users2, Thermometer, ClipboardList, ShieldCheck,
-  ScrollText, LogOut, FlaskConical, FileStack,
+  ScrollText, LogOut, FlaskConical, FileStack, Files,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +11,7 @@ const NAV = [
   { to: "/jobs", label: "Calibration Jobs", icon: ClipboardList, testid: "nav-jobs" },
   { to: "/customers", label: "Customers & Products", icon: Users2, testid: "nav-customers" },
   { to: "/masters", label: "Master Instruments", icon: Thermometer, testid: "nav-masters" },
+  { to: "/documents", label: "Document Control", icon: Files, testid: "nav-documents" },
   { to: "/audit", label: "Audit Trail", icon: ScrollText, testid: "nav-audit" },
   { to: "/users", label: "Users & Roles", icon: ShieldCheck, testid: "nav-users", adminOnly: true },
 ];
@@ -94,6 +95,10 @@ const STATUS_STYLES = {
   srf_approved: "bg-emerald-50 text-emerald-700",
   calibration_in_progress: "bg-violet-50 text-violet-700",
   completed: "bg-emerald-600 text-white",
+  under_review: "bg-amber-50 text-amber-700",
+  approved: "bg-blue-50 text-blue-700",
+  effective: "bg-emerald-600 text-white",
+  obsolete: "bg-red-50 text-red-700 line-through",
 };
 
 const STATUS_LABELS = {
@@ -106,6 +111,9 @@ const STATUS_LABELS = {
   srf_approved: "Ready for Calibration",
   calibration_in_progress: "Calibration In Progress",
   completed: "Completed",
+  under_review: "Under Review",
+  effective: "Effective",
+  obsolete: "Obsolete",
 };
 
 export function StatusBadge({ status }) {
