@@ -192,18 +192,8 @@ export default function NewJob() {
                       <Button variant="ghost" size="icon" onClick={() => removePoint(i, pi)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4 mt-3">
-                    {["master_readings", "uut_readings"].map((key) => (
-                      <div key={key}>
-                        <Label className="text-xs">{key === "master_readings" ? "Master (STD) readings" : "UUC readings"}</Label>
-                        <div className="flex gap-1.5 mt-1">
-                          {p[key].map((v, k) => (
-                            <Input key={k} type="number" step="0.01" className="font-mono text-xs h-8 px-1 text-center"
-                              value={v} onChange={(e) => { const arr = [...p[key]]; arr[k] = Number(e.target.value); patchPoint(i, pi, { [key]: arr }); }} />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="mt-2 text-xs text-slate-500 bg-blue-50/60 border border-blue-100 rounded px-2.5 py-1.5">
+                    5 STD + 5 UUC readings for this point are entered later in the product's <b>Readings</b> tab (all 5 preserved; average auto-calculated).
                   </div>
                 </div>
               ))}

@@ -291,6 +291,9 @@ function ItemPanel({ jobId, item, job, user, onReload, onRemove }) {
                             data-testid={`reading-${pi}-${key}-${ri}`} />
                         ))}
                       </div>
+                      <div className="mt-1.5 text-xs text-slate-500" data-testid={`avg-${pi}-${key}`}>
+                        Average: <span className="font-mono font-semibold text-slate-700">{p[key] && p[key].length ? (p[key].reduce((a, b) => a + Number(b || 0), 0) / p[key].length).toFixed(2) : "—"}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
