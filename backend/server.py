@@ -4,9 +4,11 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os
+import io
 import json
 import re
 import uuid
+import zipfile
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any
@@ -22,7 +24,7 @@ from pymongo import ReturnDocument
 import auth as authmod
 import calc as calcmod
 import storage as storagemod
-from pdf_gen import build_certificate_pdf
+from pdf_gen import build_certificate_pdf, build_evidence_summary_pdf
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -1103,6 +1105,119 @@ async def traceability(jid: str, user=Depends(current_user)):
         "items": items_out,
         "audit_trail": logs,
     }
+
+
+# ---------------- Audit Evidence Package (ZIP) ----------------
+def _safe_name(s):
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", str(s or "")).strip("_") or "item"
+
+
+@api.get("/jobs/{jid}/evidence-package")
+async def evidence_package(jid: str, user=Depends(current_user)):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cust = await db.customers.find_one({"_id": ObjectId(j["customer_id"])}) if j.get("customer_id") else None
+    items = j.get("items", [])
+    logs = await db.audit_logs.find({"entity_id": jid}).sort("timestamp", 1).to_list(2000)
+    audit_view = []
+    for l in logs:
+        if l.get("old_value") is not None or l.get("new_value") is not None:
+            change = f"{l.get('old_value')} -> {l.get('new_value')}"
+        else:
+            change = l.get("reason") or ""
+        audit_view.append({"timestamp": l.get("timestamp"), "user_name": l.get("user_name"),
+                           "action": l.get("action"), "field": l.get("field"), "change": change})
+
+    zip_buf = io.BytesIO()
+    products_view = []
+    masters_view = []
+    seen_master_files = set()
+    seen_master_rows = set()
+
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for it in items:
+            prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else None
+            pname = prod["name"] if prod else ""
+            products_view.append({
+                "product_name": pname, "serial_number": it.get("serial_number"),
+                "tag_number": it.get("tag_number"), "sr_number": it.get("sr_number"),
+                "part_number": it.get("part_number"), "url_number": it.get("url_number"),
+                "certificate_type": it.get("certificate_type"), "status": it.get("status"),
+                "cert_no": it.get("cert_no"), "certificate": it.get("certificate"),
+                "cal_date": it.get("cal_date"), "recommended_next_date": it.get("recommended_next_date"),
+            })
+            # per-product certificate PDF (only when issued)
+            if it.get("certificate"):
+                results = compute_points(it.get("points", []))
+                pdf_job = {**it, "job_no": j.get("job_no"), "work_order_ref": j.get("work_order_ref"),
+                           "cert_no": it.get("cert_no"), "ulr_no": it.get("url_number")}
+                verify_url = f"{os.environ.get('FRONTEND_URL','')}/verify/{it['certificate']['verification_id']}"
+                try:
+                    cpdf = build_certificate_pdf(pdf_job, clean(cust) if cust else {}, clean(prod) if prod else {},
+                                                 results, verify_url, cert_type=it.get("certificate_type", "NABL"))
+                    fn = _safe_name(it.get("cert_no") or pname or it["item_id"])
+                    zf.writestr(f"certificates/{fn}.pdf", cpdf.read())
+                except Exception as e:
+                    logger.error(f"evidence cert pdf failed: {e}")
+
+            # master certificates (exact version used, per standards snapshot)
+            for s in it.get("standards_used", []):
+                moid = s.get("master_oid")
+                m = None
+                if moid:
+                    try:
+                        m = await db.masters.find_one({"_id": ObjectId(moid)})
+                    except Exception:
+                        m = None
+                if not m:
+                    m = await db.masters.find_one({"master_id": s.get("id_no")})
+                if not m:
+                    continue
+                cur = m.get("attachment")
+                ver = s.get("attachment_version") or (cur or {}).get("version")
+                att = None
+                if cur and cur.get("version") == ver:
+                    att = cur
+                elif ver is not None:
+                    att = next((h for h in m.get("attachment_history", []) if h and h.get("version") == ver), None)
+                att = att or cur
+                mrow_key = (m["master_id"], (att or {}).get("version"))
+                if mrow_key not in seen_master_rows:
+                    seen_master_rows.add(mrow_key)
+                    file_name = None
+                    if att:
+                        ext = att["file_name"].rsplit(".", 1)[-1] if "." in att.get("file_name", "") else "pdf"
+                        file_name = f"{_safe_name(m['master_id'])}_v{att.get('version')}.{ext}"
+                    masters_view.append({
+                        "master_id": m.get("master_id"), "name": m.get("name"), "cert_no": m.get("cert_no"),
+                        "cal_due_date": m.get("cal_due_date"), "validity": master_status(m),
+                        "version": (att or {}).get("version"), "has_file": bool(att), "file_name": file_name,
+                    })
+                    if att and (att.get("file_path"), att.get("version")) not in seen_master_files:
+                        seen_master_files.add((att.get("file_path"), att.get("version")))
+                        try:
+                            content, _ = storagemod.get_object(att["file_path"])
+                            zf.writestr(f"master_certificates/{file_name}", content)
+                        except Exception as e:
+                            logger.error(f"evidence master cert failed: {e}")
+
+        assembled = {
+            "generated_at": now_iso(), "generated_by": user.get("name"),
+            "job_no": j.get("job_no"), "work_order_ref": j.get("work_order_ref"),
+            "work_order_source": j.get("work_order_source"),
+            "customer": clean(cust) if cust else None,
+            "srf": {"srf_no": j.get("srf_no"), "status": j.get("srf_status"), "approval": j.get("srf_approval")},
+            "products": products_view, "masters": masters_view, "audit": audit_view,
+        }
+        summary = build_evidence_summary_pdf(assembled)
+        zf.writestr("00_evidence_summary.pdf", summary.read())
+        zf.writestr("evidence.json", json.dumps(assembled, default=str, indent=2))
+
+    zip_buf.seek(0)
+    fname = f"{_safe_name(j.get('job_no'))}_audit_evidence.zip"
+    return StreamingResponse(zip_buf, media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 # ---------------- Document Control ----------------

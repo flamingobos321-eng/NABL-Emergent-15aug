@@ -185,3 +185,99 @@ def build_certificate_pdf(job, customer, product, results, verify_url, cert_type
     doc.build(story)
     buf.seek(0)
     return buf
+
+
+def build_evidence_summary_pdf(a):
+    """Audit Evidence Package cover/summary. `a` is a plain dict assembled by the API."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=14 * mm, rightMargin=14 * mm,
+                            topMargin=12 * mm, bottomMargin=12 * mm)
+    styles = getSampleStyleSheet()
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10)
+    smallb = ParagraphStyle("smallb", parent=small, fontName="Helvetica-Bold")
+    h = ParagraphStyle("h", parent=styles["Heading2"], fontSize=11, textColor=NAVY, spaceBefore=8, spaceAfter=3)
+    story = []
+    story.append(Paragraph("YOG ELECTRO PROCESS PVT. LTD. — Calibration Laboratory", ParagraphStyle(
+        "co", parent=styles["Title"], fontSize=13, textColor=BLUE, spaceAfter=1)))
+    story.append(Paragraph("AUDIT EVIDENCE PACKAGE", ParagraphStyle(
+        "t", parent=styles["Title"], fontSize=14, textColor=NAVY, spaceAfter=2)))
+    story.append(Paragraph(f"Generated: {_fmt_date(a.get('generated_at'))}", small))
+    story.append(Spacer(1, 4))
+
+    story.append(Paragraph("1. Job / Work Order", h))
+    job_rows = [
+        [Paragraph("<b>Job No.</b>", small), Paragraph(str(a.get("job_no", "")), small),
+         Paragraph("<b>Work Order Ref</b>", small), Paragraph(str(a.get("work_order_ref", "")), small)],
+        [Paragraph("<b>WO Source</b>", small), Paragraph(str(a.get("work_order_source", "")), small),
+         Paragraph("<b>Products</b>", small), Paragraph(str(len(a.get("products", []))), small)],
+        [Paragraph("<b>Customer</b>", small), Paragraph(str((a.get("customer") or {}).get("name", "")), small),
+         Paragraph("<b>SRF No.</b>", small), Paragraph(str((a.get("srf") or {}).get("srf_no") or "—"), small)],
+    ]
+    t = Table(job_rows, colWidths=[28 * mm, 63 * mm, 28 * mm, 63 * mm])
+    t.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.5, NAVY), ("INNERGRID", (0, 0), (-1, -1), 0.3, GREY),
+                           ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+    story.append(t)
+
+    srf = a.get("srf") or {}
+    if srf.get("approval"):
+        ap = srf["approval"]
+        story.append(Paragraph(f"SRF status: <b>{srf.get('status','')}</b> — customer <b>{ap.get('action','')}</b> "
+                               f"by {ap.get('customer_name','')} on {_fmt_date(ap.get('date'))}", small))
+
+    story.append(Paragraph("2. Products & Certificates", h))
+    ph = ["#", "Product", "Serial", "Type", "Certificate No.", "Verification ID", "Status"]
+    prows = [ph]
+    for i, p in enumerate(a.get("products", []), 1):
+        cert = p.get("certificate") or {}
+        prows.append([str(i), Paragraph(p.get("product_name", ""), small), p.get("serial_number", ""),
+                      p.get("certificate_type", ""), cert.get("cert_no") or p.get("cert_no") or "—",
+                      cert.get("verification_id") or "—", p.get("status", "")])
+    pt = Table(prows, colWidths=[8 * mm, 52 * mm, 24 * mm, 18 * mm, 38 * mm, 28 * mm, 20 * mm])
+    pt.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("FONTSIZE", (0, 0), (-1, -1), 7), ("GRID", (0, 0), (-1, -1), 0.3, GREY),
+                            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+    story.append(pt)
+
+    story.append(Paragraph("3. Master Instruments & their Calibration Certificates", h))
+    mh = ["Master ID", "Name", "Cert No.", "Due Date", "Validity", "Cert File (in package)"]
+    mrows = [mh]
+    for m in a.get("masters", []):
+        mrows.append([m.get("master_id", ""), Paragraph(m.get("name", ""), small), m.get("cert_no", ""),
+                      _fmt_date(m.get("cal_due_date")), m.get("validity", ""),
+                      (f"master_certificates/{m.get('file_name')}" if m.get("has_file") else "— not attached —")])
+    mt = Table(mrows, colWidths=[22 * mm, 40 * mm, 30 * mm, 22 * mm, 18 * mm, 56 * mm])
+    mt.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), BLUE), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("FONTSIZE", (0, 0), (-1, -1), 7), ("GRID", (0, 0), (-1, -1), 0.3, GREY),
+                            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+    story.append(mt)
+
+    story.append(Paragraph("4. Traceability Chain", h))
+    story.append(Paragraph("Certificate &rarr; Calibration Job / Product &rarr; Master Instrument &rarr; "
+                           "Master Calibration Certificate. Each product's certificate PDF is under "
+                           "<b>certificates/</b>; each master's external calibration certificate (the exact version "
+                           "used) is under <b>master_certificates/</b>; the full change history is in "
+                           "<b>Section 5</b> and <b>evidence.json</b>.", small))
+
+    story.append(Paragraph("5. Audit Trail", h))
+    ah = ["Time", "User", "Action", "Field", "Change"]
+    arows = [ah]
+    for l in a.get("audit", []):
+        arows.append([Paragraph((l.get("timestamp", "") or "")[:19].replace("T", " "), small),
+                      Paragraph(str(l.get("user_name", "")), small), Paragraph(str(l.get("action", "")), small),
+                      Paragraph(str(l.get("field") or "—"), small), Paragraph(str(l.get("change") or "—"), small)])
+    at = Table(arows, colWidths=[30 * mm, 26 * mm, 30 * mm, 40 * mm, 56 * mm], repeatRows=1)
+    at.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("FONTSIZE", (0, 0), (-1, -1), 6.5), ("GRID", (0, 0), (-1, -1), 0.25, GREY),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                            ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
+    story.append(at)
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("(---- End of Audit Evidence Summary ----)", ParagraphStyle(
+        "end", parent=small, alignment=1, fontSize=7)))
+    doc.build(story)
+    buf.seek(0)
+    return buf

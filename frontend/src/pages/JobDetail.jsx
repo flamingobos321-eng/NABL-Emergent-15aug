@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
-import api, { fmtDate, num, formatApiError, PDF_URL } from "@/lib/api";
+import api, { fmtDate, num, formatApiError, PDF_URL, EVIDENCE_URL } from "@/lib/api";
 import { PageHeader, StatusBadge } from "@/components/Layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,7 +48,12 @@ export default function JobDetail() {
       <PageHeader
         title={<span className="font-mono">{job.job_no}</span>}
         subtitle={`${job.customer?.name || ""} · WO ${job.work_order_ref || "—"} · ${items.length} product(s)`}
-        actions={<div className="flex items-center gap-3"><StatusBadge status={job.status} /></div>}
+        actions={<div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => window.open(EVIDENCE_URL(id), "_blank")} data-testid="evidence-package-btn">
+            <Download className="h-4 w-4 mr-1.5" /> Audit Evidence (ZIP)
+          </Button>
+          <StatusBadge status={job.status} />
+        </div>}
       />
 
       <Tabs defaultValue="products">

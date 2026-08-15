@@ -63,6 +63,14 @@ Each Master Instrument can now carry its external calibration certificate docume
 - Frontend: Masters edit dialog has an attachment section (upload/replace, view current, list & open previous versions); masters table shows a paperclip quick-view when a cert is attached.
 - Verified via curl (upload v1 → replace v2, history len 1, cert_no synced, current+historical downloads 200 PDF, audit trail) and UI screenshot.
 
+## Audit Evidence Package (2026-06-15 — DONE, P1)
+`GET /api/jobs/{jid}/evidence-package` streams a ZIP per job assembling the full audit chain **Certificate → Job/Product → Master → Master Calibration Certificate**:
+- `00_evidence_summary.pdf` — cover: job/WO, customer, SRF status + customer approval, products & certificates table, masters table (with the cert file bundled + validity), traceability-chain statement, and the full audit trail.
+- `certificates/{cert_no}.pdf` — each issued product's NABL/Traceable certificate (with QR).
+- `master_certificates/{master_id}_v{version}.{ext}` — the exact version of each master's external calibration certificate that was used (resolved from the per-item `standards_used` snapshot; falls back to current).
+- `evidence.json` — machine-readable assembly (job, customer, srf, products, masters, audit).
+- Frontend: JobDetail header has an "Audit Evidence (ZIP)" button (cookie-auth download). Verified via curl on a seeded job with an attached master cert: ZIP contained the product certificate, `master_certificates/YOG-27_v1.pdf`, summary PDF (audit trail), and evidence.json.
+
 ## Remaining Backlog (post multi-product)
 - P1: Audit Evidence Package (bundle WO + SRF + calibration records + master certs + audit trail into one download per job).
 - P2: Old-file cleanup in Object Storage when a Document attachment is replaced.
