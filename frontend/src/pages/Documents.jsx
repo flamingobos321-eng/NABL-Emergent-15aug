@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import api, { fmtDate, formatApiError } from "@/lib/api";
+import { useEffect, useState, useRef } from "react";
+import api, { fmtDate, formatApiError, API } from "@/lib/api";
 import { PageHeader, StatusBadge } from "@/components/Layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
-import { Plus, Send, CheckCircle2, Stamp, GitBranch, History } from "lucide-react";
+import { Plus, Send, CheckCircle2, Stamp, GitBranch, History, Paperclip, FileDown } from "lucide-react";
 
 const CATEGORIES = ["Quality Manual", "SOP", "Calibration Procedure", "Work Instruction", "Form",
   "Calculation Method", "Uncertainty Procedure", "Equipment Procedure", "Environmental Procedure",
@@ -30,6 +30,24 @@ export default function Documents() {
   const [reviseFor, setReviseFor] = useState(null);
   const [reviseNote, setReviseNote] = useState("");
   const [history, setHistory] = useState(null);
+  const fileRef = useRef(null);
+  const [uploadFor, setUploadFor] = useState(null);
+
+  const onFilePicked = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !uploadFor) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      await api.post(`/documents/${uploadFor}/attachment`, fd);
+      toast.success("File attached");
+      load();
+    } catch (e2) { toast.error(formatApiError(e2.response?.data?.detail)); }
+    setUploadFor(null);
+  };
+  const pickFile = (id) => { setUploadFor(id); setTimeout(() => fileRef.current?.click(), 0); };
+  const viewFile = (id) => window.open(`${API}/documents/${id}/attachment`, "_blank");
 
   const load = () => {
     let url = "/documents";
@@ -117,6 +135,8 @@ export default function Documents() {
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1">
                     <Button size="icon" variant="ghost" title="History" onClick={() => showHistory(d)} data-testid={`doc-history-${d.id}`}><History className="h-4 w-4 text-slate-400" /></Button>
+                    {d.attachment && <Button size="icon" variant="ghost" title={d.attachment.file_name} onClick={() => viewFile(d.id)} data-testid={`doc-viewfile-${d.id}`}><FileDown className="h-4 w-4 text-blue-500" /></Button>}
+                    {canManage && <Button size="icon" variant="ghost" title="Attach file" onClick={() => pickFile(d.id)} data-testid={`doc-attach-${d.id}`}><Paperclip className={`h-4 w-4 ${d.attachment ? "text-emerald-500" : "text-slate-400"}`} /></Button>}
                     {canManage && d.status === "draft" && <Button size="sm" variant="outline" onClick={() => transition(d.id, "under_review")} data-testid={`doc-review-${d.id}`}><Send className="h-3.5 w-3.5 mr-1" /> Review</Button>}
                     {canManage && d.status === "under_review" && <Button size="sm" variant="outline" className="text-blue-700 border-blue-200" onClick={() => transition(d.id, "approved")} data-testid={`doc-approve-${d.id}`}><CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve</Button>}
                     {canManage && d.status === "approved" && <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => transition(d.id, "effective")} data-testid={`doc-effective-${d.id}`}><Stamp className="h-3.5 w-3.5 mr-1" /> Make Effective</Button>}
@@ -161,6 +181,9 @@ export default function Documents() {
           </div>
         </DialogContent>
       </Dialog>
+      {/* Hidden file input for attachments */}
+      <input ref={fileRef} type="file" className="hidden" onChange={onFilePicked}
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.csv,.txt" data-testid="doc-file-input" />
     </div>
   );
 }

@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 4 (Document Control file attachment) — ALL PASSED end-to-end. Backend: created /app/backend/tests/test_doc_attachment.py with 10 tests, ALL 10 PASS in 3.06s. Coverage: (a) POST /api/documents/{id}/attachment as Quality Manager returns {ok:true, attachment:{file_name,file_path,content_type,size}} — verified size, content_type and file_path present; (b) GET /api/documents lists the attachment object on the document record; (c) GET /api/documents/{id}/attachment with COOKIE returns 200 + application/pdf bytes starting with %PDF; (d) GET with Bearer token (fresh session, no cookies) returns 200 + PDF bytes; (e) GET without any auth returns 401; (f) Viewer (viewer@yog.local) POST returns 403; (g) File >20MB returns 400 'File exceeds 20 MB limit'; (h) Re-upload replaces the attachment — single 'attachment' object with latest filename (second.pdf) on the document record; (i) GET /api/documents/{id}/history revisions[].history contains an 'file attached' entry; (j) GET /api/audit?entity_id={did} contains action='attach_file'. Regression: ran test_bugfix_iter3.py (11/11 PASS in 2.23s) — seeded jobs CY/212.01 and CY/219.03 still return 0 FAIL validation rows; product/master edit/delete/archive/audit trail intact. Frontend Playwright walk (login quality@yog.local/Quality@2026 on public preview URL): Document Control page loads and shows 7 attach buttons (data-testid doc-attach-{id}) matching seeded docs + created test doc. Hidden input data-testid=doc-file-input exists exactly once. Clicked doc-attach-{seeded-FTECH04-id}, called locator.set_input_files() with a small PDF → exactly one POST fired to /api/documents/{id}/attachment, 'File attached' success toast appeared, doc-viewfile-{id} button rendered on the row. Clicking doc-viewfile-{id} opened a new tab at ${API}/documents/{id}/attachment (URL asserted). All data-testids from the review request are present and wired correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/documents/{id}/attachment", "issue": "Response media_type falls back to att.content_type; when att.content_type is 'application/octet-stream' (unknown ext) the storage-returned Content-Type is discarded. Cosmetic only — client always gets a valid stream."},
+      {"endpoint": "POST /api/documents/{id}/attachment", "issue": "No cleanup of the previous storage object on re-upload. The old blob at storage path {app}/documents/{did}/{prev-uuid}.{ext} is orphaned. Consider deleting the old object after a successful replace to avoid storage bloat."},
+      {"endpoint": "POST /api/documents/{id}/attachment", "issue": "20 MB check runs AFTER file.read() so a malicious client can still force the server to buffer up to whatever UploadFile's spool allows. Consider streaming/aborting once total > 20 MB, or setting a starlette max_request_size."},
+      {"endpoint": "GET /api/documents/{id}/attachment", "issue": "Accepts token via ?auth= query param (see download_document_file signature). Any URL logging (proxy access logs, browser history, referrers) will leak the JWT. Not exploited by current frontend (it uses cookie), but the parameter is publicly accessible — consider removing ?auth= or accepting only a short-lived signed URL token."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Document Control table", "issues": ["One legacy row exists with EMPTY doc_number and EMPTY title (category=SOP, rev 01, effective 15 Aug 2026) — clearly a stray record from a previous iteration. Same class of hygiene issue flagged in iteration_3 for products. Recommend db.documents.deleteMany({doc_number: ''}) or a data-fix migration."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_doc_attachment.py",
+    "/app/test_reports/pytest/iter4_attach.xml"
+  ],
+  "action_items": [
+    "(Optional) Delete previous storage object on re-upload to avoid orphaned blobs.",
+    "(Optional) Remove ?auth= query-param bypass on GET /api/documents/{id}/attachment (JWT-in-URL leak risk).",
+    "(Optional) Enforce 20 MB limit BEFORE fully reading the upload into memory.",
+    "(Data hygiene) Delete the legacy document row with empty doc_number/title visible on the Document Control page."
+  ],
+  "critical_code_review_comments": [
+    "server.py:983 — `data = await file.read()` reads the entire body before the 20 MB check; use streaming read with running size counter and abort early to avoid DoS via large uploads.",
+    "server.py:1004 — accepting JWT via ?auth= query param defeats the httpOnly-cookie strategy (tokens end up in access logs / referer headers). Recommend deleting the `auth` query param path or replacing it with a short-lived signed-URL scheme.",
+    "server.py:988-998 — no removal of the previous storage object when re-uploading. Consider capturing d['attachment']['file_path'] before the $set and issuing storagemod.delete_object() post-update (add delete_object helper to storage.py).",
+    "storage.py — init_storage() is process-wide singleton with lazy fallback on 404; good, but there's no thread-safe lock. Under concurrent first requests, two threads may both POST /init. Not a correctness bug (idempotent) but worth a lock.",
+    "Documents.jsx:43 — sending explicit `Content-Type: multipart/form-data` header strips the boundary in some axios versions. Currently works because axios detects FormData and overrides, but safer to omit the header entirely and let axios set it."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_doc_attachment.py (new)",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {"backend": "100% (10/10 in test_doc_attachment.py; regression 11/11 in test_bugfix_iter3.py)", "frontend": "100% — attach button clickable, hidden input accepts file, POST fires, success toast, viewfile button appears and opens the attachment URL"},
+  "test_credentials": "Unchanged. Used quality@yog.local/Quality@2026 for uploads, mbhashik@gmail.com/Yog@Admin2026 for doc creation & audit reads, viewer@yog.local/View@2026 to assert 403.",
+  "seed_data_creation": "Backend tests created one TEST-ATTACH-001 document (category=quality, SOP, revision 0) and attempted DELETE at teardown. NOTE: as of last screenshot the TEST-ATTACH-001 doc still appears in the UI list — cleanup DELETE may have returned non-2xx silently (documents DELETE endpoint semantics not verified in this iteration). Frontend UI test uploaded a small dummy PDF to seeded document FTECH04 (id 6a80510bc2276d0a28854106); this is a REAL attachment on the seeded FTECH04 record. If demo integrity requires a pristine FTECH04, run: db.documents.updateOne({doc_number:'FTECH04'}, {$unset:{attachment:''}}).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Four backend pytest suites now: backend_test.py, test_workorder_flow.py, test_bugfix_iter3.py, test_doc_attachment.py. NOTE: /app/backend/pytest.ini pins `-n 2 --dist loadscope` so any new suite that shares module state may collide — run individual suites with `-n 0` when in doubt. The attach feature is fully verified. FTECH04 seeded doc now has an attachment (see seed_data_creation). One leftover TEST-ATTACH-001 doc may need manual cleanup.",
+  "rca of the issue": "N/A — no bugs discovered. Feature works end-to-end. Only advisory items are: (1) JWT-in-URL via ?auth=; (2) orphaned storage blobs on re-upload; (3) 20 MB check happens post-read; (4) one legacy empty-title document row visible in UI."
+}

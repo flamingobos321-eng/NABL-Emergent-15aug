@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any
 
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, UploadFile, File, Query, Header
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -21,6 +21,7 @@ from pymongo import ReturnDocument
 
 import auth as authmod
 import calc as calcmod
+import storage as storagemod
 from pdf_gen import build_certificate_pdf
 
 mongo_url = os.environ["MONGO_URL"]
@@ -973,6 +974,60 @@ async def document_history(did: str, user=Depends(current_user)):
     return {"doc_number": d["doc_number"], "revisions": [clean(x) for x in revs]}
 
 
+@api.post("/documents/{did}/attachment")
+async def upload_document_file(did: str, file: UploadFile = File(...), user=Depends(require("admin", "quality"))):
+    d = await db.documents.find_one({"_id": ObjectId(did)})
+    if not d:
+        raise HTTPException(status_code=404, detail="Document not found")
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File exceeds 20 MB limit")
+    ext = (file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "bin")
+    ctype = file.content_type or storagemod.MIME_TYPES.get(ext, "application/octet-stream")
+    path = f"{storagemod.APP_NAME}/documents/{did}/{uuid.uuid4()}.{ext}"
+    try:
+        result = storagemod.put_object(path, data, ctype)
+    except Exception as e:
+        logger.error(f"Storage upload failed: {e}")
+        raise HTTPException(status_code=502, detail="File storage upload failed")
+    att = {"file_path": result["path"], "file_name": file.filename,
+           "content_type": ctype, "size": result.get("size", len(data)),
+           "uploaded_by": user["name"], "uploaded_at": now_iso()}
+    await db.documents.update_one({"_id": ObjectId(did)}, {
+        "$set": {"attachment": att, "updated_at": now_iso()},
+        "$push": {"history": {"action": "file attached", "by": user["name"], "at": now_iso(), "note": file.filename}}})
+    await audit("document", did, "attach_file", user, new=file.filename)
+    return {"ok": True, "attachment": att}
+
+
+@api.get("/documents/{did}/attachment")
+async def download_document_file(did: str, request: Request, authorization: str = Header(None)):
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    else:
+        token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        authmod.decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    d = await db.documents.find_one({"_id": ObjectId(did)})
+    if not d or not d.get("attachment"):
+        raise HTTPException(status_code=404, detail="No attachment for this document")
+    att = d["attachment"]
+    try:
+        content, ctype = storagemod.get_object(att["file_path"])
+    except Exception as e:
+        logger.error(f"Storage download failed: {e}")
+        raise HTTPException(status_code=502, detail="File storage download failed")
+    return Response(content=content, media_type=att.get("content_type", ctype),
+                    headers={"Content-Disposition": f'inline; filename="{att.get("file_name", "document")}"'})
+
+
+
+
 # ---------------- Public verification ----------------
 @api.get("/verify/{verification_id}")
 async def verify(verification_id: str):
@@ -1106,6 +1161,11 @@ async def seed():
 
 @app.on_event("startup")
 async def startup():
+    try:
+        storagemod.init_storage()
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.error(f"Storage init failed: {e}")
     await seed()
 
 
