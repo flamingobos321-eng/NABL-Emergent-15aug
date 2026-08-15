@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any
 
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, UploadFile, File, Query, Header
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, UploadFile, File, Form, Query, Header
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -405,6 +405,93 @@ async def delete_master(mid: str, user=Depends(require("admin", "technician"))):
     return {"archived": False, "message": "Master deleted."}
 
 
+# ----- Master external calibration certificate attachment -----
+@api.post("/masters/{mid}/attachment")
+async def upload_master_cert(mid: str, file: UploadFile = File(...),
+                             cert_no: str = Form(""), cal_agency: str = Form(""),
+                             cal_date: str = Form(""), cal_due_date: str = Form(""),
+                             notes: str = Form(""),
+                             user=Depends(require("admin", "technician", "quality"))):
+    m = await db.masters.find_one({"_id": ObjectId(mid)})
+    if not m:
+        raise HTTPException(status_code=404, detail="Master not found")
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File exceeds 20 MB limit")
+    ext = (file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "bin")
+    ctype = file.content_type or storagemod.MIME_TYPES.get(ext, "application/octet-stream")
+    path = f"{storagemod.APP_NAME}/masters/{mid}/{uuid.uuid4()}.{ext}"
+    try:
+        result = storagemod.put_object(path, data, ctype)
+    except Exception as e:
+        logger.error(f"Storage upload failed: {e}")
+        raise HTTPException(status_code=502, detail="File storage upload failed")
+    prev = m.get("attachment")
+    version = (m.get("attachment_version") or 0) + 1
+    att = {
+        "file_path": result["path"], "file_name": file.filename,
+        "content_type": ctype, "size": result.get("size", len(data)),
+        "version": version,
+        "cert_no": cert_no or m.get("cert_no", ""),
+        "cal_agency": cal_agency or m.get("traceability", ""),
+        "cal_date": cal_date or m.get("cal_date", ""),
+        "cal_due_date": cal_due_date or m.get("cal_due_date", ""),
+        "notes": notes,
+        "uploaded_by": user["name"], "uploaded_at": now_iso(),
+    }
+    updates = {"attachment": att, "attachment_version": version}
+    # keep the master's structured cal fields in sync (kept separate from the file)
+    if cert_no:
+        updates["cert_no"] = cert_no
+    if cal_agency:
+        updates["traceability"] = cal_agency
+    if cal_date:
+        updates["cal_date"] = cal_date
+    if cal_due_date:
+        updates["cal_due_date"] = cal_due_date
+    push = {"$push": {"attachment_history": prev}} if prev else {}
+    await db.masters.update_one({"_id": ObjectId(mid)}, {"$set": updates, **push})
+    was = master_status(m)
+    note = (f"Replaced cal cert (v{prev.get('version')} '{prev.get('cert_no','')}' -> v{version} '{att['cert_no']}')"
+            if prev else f"Attached cal cert v{version} '{att['cert_no']}'")
+    if was in ("expired", "retired", "inactive", "out_of_service"):
+        note += f" — NOTE: master was '{was}' at time of change"
+    await audit("master", mid, "cal_cert_replace" if prev else "cal_cert_attach", user,
+                old=(prev or {}).get("cert_no"), new=att["cert_no"], reason=note)
+    return {"ok": True, "attachment": att}
+
+
+@api.get("/masters/{mid}/attachment")
+async def download_master_cert(mid: str, request: Request, version: Optional[int] = None,
+                               authorization: str = Header(None)):
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    else:
+        token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        authmod.decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    m = await db.masters.find_one({"_id": ObjectId(mid)})
+    if not m:
+        raise HTTPException(status_code=404, detail="Master not found")
+    att = m.get("attachment")
+    if version is not None and (not att or att.get("version") != version):
+        att = next((h for h in m.get("attachment_history", []) if h and h.get("version") == version), None)
+    if not att:
+        raise HTTPException(status_code=404, detail="No calibration certificate attached")
+    try:
+        content, ctype = storagemod.get_object(att["file_path"])
+    except Exception as e:
+        logger.error(f"Storage download failed: {e}")
+        raise HTTPException(status_code=502, detail="File storage download failed")
+    return Response(content=content, media_type=att.get("content_type", ctype),
+                    headers={"Content-Disposition": f'inline; filename="{att.get("file_name", "master_cert")}"'})
+
+
 # ---------------- Templates ----------------
 @api.get("/templates")
 async def list_templates(user=Depends(current_user)):
@@ -423,10 +510,16 @@ async def hydrate_standards(master_ids):
     for mid in master_ids:
         m = await db.masters.find_one({"master_id": mid})
         if m:
+            att = m.get("attachment") or {}
             stds.append({
                 "name": m["name"], "uncertainty": m.get("uncertainty", 0),
                 "id_no": m.get("master_id", ""), "certified_by": m.get("traceability", ""),
                 "report_no": m.get("cert_no", ""), "validity": m.get("cal_due_date", ""),
+                "master_oid": str(m["_id"]),
+                "cal_date": m.get("cal_date", ""),
+                "attachment_version": att.get("version"),
+                "attachment_file_name": att.get("file_name"),
+                "has_attachment": bool(att),
             })
     return stds
 
@@ -996,6 +1089,7 @@ async def traceability(jid: str, user=Depends(current_user)):
             "certificate": it.get("certificate"), "certificate_type": it.get("certificate_type"),
             "approval": it.get("approval"), "review": it.get("review"),
             "cal_date": it.get("cal_date"), "method": it.get("method"),
+            "standards_used": it.get("standards_used", []),
             "calibration_points": [{"label": p.get("point_label"), "nominal": p.get("nominal")} for p in it.get("points", [])],
             "masters": masters,
             "readings": [{"point": p.get("point_label"), "master_readings": p.get("master_readings"),

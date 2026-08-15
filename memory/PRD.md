@@ -53,8 +53,17 @@ Structural paradigm shift completed: a **Calibration Job is now a CONTAINER** (j
 - Frontend: NewJob multi-product form ("Add Another Product"), JobDetail product-selector chips + per-product `ItemPanel` (Overview/Readings/Calc/Excel-vs-App/Certificate + workflow bar), SRF multi-product table, Jobs/Dashboard show product counts, `PDF_URL(jid,itemId)`.
 - Verified: 12/12 backend pytest pass, frontend flows pass, calc engine 0 FAIL, distinct verification_id per product.
 
+## Master Instrument External Cal-Cert Attachments (2026-06-15 — DONE, P1)
+Each Master Instrument can now carry its external calibration certificate document (Object Storage):
+- `POST /api/masters/{mid}/attachment` (multipart file + optional cert_no/cal_agency/cal_date/cal_due_date/notes) — uploads/replaces; on replace the previous attachment is pushed to `attachment_history` (retained), version auto-increments, and every replace writes an AUDIT log (`cal_cert_attach`/`cal_cert_replace`) with old→new cert and a note if the master was expired/retired at the time (never a silent replace).
+- `GET /api/masters/{mid}/attachment[?version=N]` — auth-gated stream of current or any historical version.
+- Structured master fields (cert_no, traceability/agency, cal_date, cal_due_date) stay separate on the master and are synced from the upload form when provided.
+- `hydrate_standards` now snapshots `master_oid`, `attachment_version`, `has_attachment`, `attachment_file_name`, `cal_date` into each job item's `standards_used`, so a historical calibration record retains the exact master identity/version used even if the master is later changed.
+- Traceability endpoint returns `standards_used` per item, enabling the chain Certificate → Job/Product → Master → Master Cal Certificate (for the future Audit Evidence Package).
+- Frontend: Masters edit dialog has an attachment section (upload/replace, view current, list & open previous versions); masters table shows a paperclip quick-view when a cert is attached.
+- Verified via curl (upload v1 → replace v2, history len 1, cert_no synced, current+historical downloads 200 PDF, audit trail) and UI screenshot.
+
 ## Remaining Backlog (post multi-product)
-- P1: Master Certificates file attachment (attach external cal certs to Masters via existing Object Storage).
 - P1: Audit Evidence Package (bundle WO + SRF + calibration records + master certs + audit trail into one download per job).
 - P2: Old-file cleanup in Object Storage when a Document attachment is replaced.
 - P2: Inline attachment preview in document rows.

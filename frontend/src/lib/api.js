@@ -31,5 +31,6 @@ export function formatApiError(detail) {
 }
 
 export const PDF_URL = (jid, itemId) => `${API}/jobs/${jid}/items/${itemId}/certificate/pdf`;
+export const MASTER_ATTACH_URL = (mid, version) => `${API}/masters/${mid}/attachment${version ? `?version=${version}` : ""}`;
 export { API };
 export default api;
