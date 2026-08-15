@@ -55,6 +55,7 @@ export default function NewJob() {
       serial_number: p?.serial_number || s.serial_number,
       tag_number: p?.tag_number || s.tag_number,
       cert_no: p?.reference_no || s.cert_no,
+      ulr_no: p?.ulr_no || s.ulr_no,
     }));
   };
 

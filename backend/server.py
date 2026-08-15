@@ -106,6 +106,7 @@ class ProductIn(BaseModel):
     serial_number: str = ""
     tag_number: str = ""
     reference_no: str = ""
+    ulr_no: str = ""
     specification: str = ""
 
 
