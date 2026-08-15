@@ -39,7 +39,8 @@ def _qr_image(url):
     return buf
 
 
-def build_certificate_pdf(job, customer, product, results, verify_url):
+def build_certificate_pdf(job, customer, product, results, verify_url, cert_type="NABL"):
+    is_nabl = str(cert_type).upper() == "NABL"
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
@@ -58,12 +59,16 @@ def build_certificate_pdf(job, customer, product, results, verify_url):
         "co2", parent=styles["Normal"], fontSize=8, alignment=1, textColor=colors.grey)))
     story.append(Spacer(1, 4))
     story.append(Paragraph("CALIBRATION CERTIFICATE", title))
+    story.append(Paragraph(
+        ("NABL Accredited Calibration Certificate" if is_nabl else "Traceable Calibration Certificate"),
+        ParagraphStyle("ctype", parent=styles["Normal"], fontSize=8.5, alignment=1,
+                       textColor=(BLUE if is_nabl else colors.HexColor("#475569")), spaceAfter=2)))
     story.append(Spacer(1, 2))
 
     meta = [
         [Paragraph("<b>Certificate No.:</b> " + str(job.get("cert_no", "")), small),
          Paragraph("<b>Calibration Date:</b> " + _fmt_date(job.get("cal_date")), small)],
-        [Paragraph("<b>ULR No.:</b> " + str(job.get("ulr_no", "")), small),
+        [Paragraph(("<b>ULR No.:</b> " + str(job.get("ulr_no", ""))) if is_nabl else "<b>Certificate Type:</b> Traceable", small),
          Paragraph("<b>Issue Date:</b> " + _fmt_date(job.get("issue_date")), small)],
         [Paragraph("<b>Job No.:</b> " + str(job.get("job_no", "")), small),
          Paragraph("<b>Item Received Date:</b> " + _fmt_date(job.get("item_received_date")), small)],

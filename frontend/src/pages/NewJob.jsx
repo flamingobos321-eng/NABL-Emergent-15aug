@@ -20,6 +20,7 @@ export default function NewJob() {
   const [masters, setMasters] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [f, setF] = useState({
+    work_order_ref: "", work_order_date: "", work_order_notes: "",
     customer_id: "", product_id: "", serial_number: "", tag_number: "",
     cal_date: "", issue_date: "", item_received_date: "", cert_no: "", ulr_no: "",
     method: "WI – TECH/11", reference_standard: "", template_code: "",
@@ -81,6 +82,8 @@ export default function NewJob() {
         <Card className="lg:col-span-2 p-5 space-y-4">
           <h3 className="font-head font-semibold">Job Details</h3>
           <div className="grid grid-cols-2 gap-3">
+            <div><Label>Work Order Reference *</Label><Input data-testid="job-wo-ref" value={f.work_order_ref} onChange={(e) => setF({ ...f, work_order_ref: e.target.value })} placeholder="WO-2026-00458 (from Billing/ERP)" /></div>
+            <div><Label>Work Order Date</Label><Input type="date" value={f.work_order_date} onChange={(e) => setF({ ...f, work_order_date: e.target.value })} /></div>
             <div>
               <Label>Customer</Label>
               <Select value={f.customer_id} onValueChange={(v) => setF({ ...f, customer_id: v, product_id: "" })}>

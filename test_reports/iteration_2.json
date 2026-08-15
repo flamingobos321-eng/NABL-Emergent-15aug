@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 2: Comprehensive testing of new WORK-ORDER-first workflow. Wrote /app/backend/tests/test_workorder_flow.py (20 tests, ALL PASS) exercising: dashboard wo_pipeline+recent_work_orders, seeded WO/2026/001 (verified 2 items TC001 NABL K-IND [100,400] + TC002 Traceable RTD-IND [100,200]), full destructive workflow on a NEW WO (create → start-calibration BLOCKED before customer approval (400) → review → prepare-srf (verified customer name/address/items+points+cert_type prefilled from WO) → send-srf (returns token + secure link) → public GET /api/srf/{token} WITHOUT any auth cookie → public POST /api/srf/{token}/action approve → start-calibration creates one job per item with correct certificate_type propagated (NABL and Traceable) and points, WO status → calibration_in_progress → start-calibration second call blocked 400 → approve BOTH jobs → verified certificate PDFs via pypdf text extraction: NABL PDF contains 'NABL Accredited' + 'ULR', Traceable PDF contains 'Traceable Calibration' and does NOT contain 'ULR No.' → WO auto-transitions to 'completed' → public /api/verify/{vid} returns matching certificate_type). Separate WOs used for request_correction (verified lab can re-send after correction; status flips srf_correction_requested→srf_sent) and reject (status→srf_rejected). RBAC: viewer POST /api/work-orders → 403; public SRF endpoints work without any auth. Calc engine regression: CY/219.03 + CY/212.01 validation still 0 FAIL (skipped one where prior iteration stripped excel_reference — pre-existing side-effect from iteration 1). Frontend UI walk verified: Login → Dashboard shows WORK ORDER PIPELINE cards (new/srf_pending/customer_approval/ready/in_progress/correction) + Recent Work Orders table with seeded WO/2026/001 + Master Validity widget. WorkOrders list shows seeded WO. NewWorkOrder form (wo-number, wo-customer select, wo-item-points-0, wo-item-certtype-0=NABL, wo-item-template-0) submits and lands on WorkOrderDetail with stepper (Received→Lab Review→SRF Prepared→SRF Sent→Approved→Calibrating→Completed). Review Work Order + Prepare SRF + Send SRF actions all worked; secure /srf/{token} link is rendered with Copy/Open. Public SRF page (opened in a fresh incognito context with cookies cleared) rendered srf-public-card WITHOUT auth and showed srf-approve-btn / srf-correction-btn / srf-reject-btn. Overall backend+frontend flows for WO-first workflow are functional end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/jobs (create job manually)", "issue": "Latent bug from iteration 1 still present: JobCreate model has no job_no field but audit() references body.job_no. Would 500 if UI calls it. Not exercised in this iteration because WO start-calibration creates jobs directly via server.py, bypassing this code path."},
+      {"endpoint": "PUT /api/jobs/{id}/readings", "issue": "PointIn does not include excel_reference; any technician edit strips the seeded ground-truth. Pre-existing from iteration 1."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_workorder_flow.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/wo_flow_results.xml"
+  ],
+  "action_items": [
+    "(Optional carry-over) Add job_no field to JobCreate model so ad-hoc POST /api/jobs works.",
+    "(Optional carry-over) Preserve excel_reference in PUT /api/jobs/{id}/readings.",
+    "Consider adding backend guard so start-calibration is idempotent by returning existing job_ids instead of 400 when jobs already exist (currently 400 which is fine but slightly UX-unfriendly)."
+  ],
+  "critical_code_review_comments": [
+    "server.py start_calibration creates a new products row for every WO item that doesn't match name — could pollute products collection over time; consider matching on customer_id+name+serial or dedupe.",
+    "prepare_srf overwrites srf on every call; if lab edits SRF then re-clicks Prepare SRF, edits are lost. Consider a guard or explicit 'reset'.",
+    "public_srf_action allows re-approve/re-reject when status is srf_sent or srf_correction_requested but NOT after already srf_approved — good; however it allows toggling from srf_correction_requested → srf_rejected which may be desired but should be documented.",
+    "WO 'completed' transition on approve() lives inside job approval path; if a WO is manually deleted or jobs deleted, WO could get stuck. Add a maintenance recompute endpoint later.",
+    "Dashboard aggregates by loading up to 2000 jobs + 2000 work_orders in-memory; will not scale. Fine for MVP."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_workorder_flow.py (new comprehensive WO workflow pytest suite, 20 tests)",
+    "/app/test_reports/iteration_2.json"
+  ],
+  "success_rate": {"backend": "100% (20/20 in test_workorder_flow.py; prior 19/19 in backend_test.py still valid)", "frontend": "100% of WO workflow UI checkpoints verified via Playwright + screenshots"},
+  "test_credentials": "Unchanged from iteration 1: admin mbhashik@gmail.com/Yog@Admin2026, technician@yog.local/Tech@2026, reviewer@yog.local/Review@2026, signatory@yog.local/Sign@2026, viewer@yog.local/View@2026.",
+  "seed_data_creation": "Test suite created many TEST_WO/* and UI-* work orders (visible on dashboard 'Recent Work Orders'). Seeded WO/2026/001 was NOT consumed (still in 'work_order_received' status, ready for user's UI demo). Test-created WOs left in DB for auditability; can be cleaned up by dropping db.work_orders rows where wo_number startswith('TEST_') or ('UI-') if desired. NOTE: Also created two customers named TestThermocouple/TestRTD products under existing seeded customer.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Two backend pytest files now: /app/backend/tests/backend_test.py (iteration 1 - 19 tests, core auth/RBAC/jobs/audit/masters) and /app/backend/tests/test_workorder_flow.py (iteration 2 - 20 tests, WO→SRF→Job workflow + cert type + PDF headers via pypdf). Requires `pip install pypdf` (installed in this iteration). Seeded WO/2026/001 is intact and unmodified. Two seeded calibration jobs still exist (CY/219.03 with excel_reference intact per this run, CY/212.01 may have had excel_reference stripped in iteration 1 — test skips gracefully if so). Frontend WO workflow works end-to-end including the public /srf/{token} route with no auth.",
+  "rca of the issue": "N/A — no bugs discovered in this iteration."
+}

@@ -13,7 +13,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import {
-  Calculator, FileText, Save, CheckCircle2, ClipboardCheck, Stamp, Download, ShieldCheck, XCircle,
+  Calculator, FileText, Save, CheckCircle2, ClipboardCheck, Stamp, Download, ShieldCheck, XCircle, Send,
 } from "lucide-react";
 
 const DIST_LABEL = { normal_k2: "Normal (÷2)", rect_root3: "Rectangular (÷√3)", typeA: "Type A (s/√n)" };
@@ -25,6 +25,7 @@ export default function JobDetail() {
   const [computed, setComputed] = useState(null);
   const [validation, setValidation] = useState(null);
   const [audit, setAudit] = useState([]);
+  const [preCheck, setPreCheck] = useState(null);
   const [saving, setSaving] = useState(false);
   const [reason, setReason] = useState("");
 
@@ -33,6 +34,7 @@ export default function JobDetail() {
     setJob(data);
     const a = await api.get(`/audit?entity_id=${id}`);
     setAudit(a.data);
+    try { const pc = await api.get(`/jobs/${id}/pre-release-check`); setPreCheck(pc.data); } catch {}
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
@@ -75,6 +77,8 @@ export default function JobDetail() {
   };
 
   const openPdf = () => window.open(PDF_URL(id), "_blank");
+  const prepareSrf = async () => { try { await api.post(`/jobs/${id}/prepare-srf`); toast.success("SRF prepared"); await load(); } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } };
+  const sendSrf = async () => { try { await api.post(`/jobs/${id}/send-srf`); toast.success("SRF sent to customer"); await load(); } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } };
 
   return (
     <div>
@@ -124,6 +128,7 @@ export default function JobDetail() {
       <Tabs defaultValue="overview">
         <TabsList className="mb-4">
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="srf" data-testid="tab-srf">SRF</TabsTrigger>
           <TabsTrigger value="readings" data-testid="tab-readings">Readings</TabsTrigger>
           <TabsTrigger value="calc" data-testid="tab-calc">Calculation</TabsTrigger>
           <TabsTrigger value="validation" data-testid="tab-validation">Excel vs App</TabsTrigger>
@@ -138,7 +143,10 @@ export default function JobDetail() {
               <h3 className="font-head font-semibold mb-3">Job Information</h3>
               <dl className="text-sm divide-y divide-slate-100">
                 {[
+                  ["Work Order Ref (Billing/ERP)", job.work_order_ref],
+                  ["SRF No.", job.srf_no],
                   ["Certificate No.", job.cert_no], ["ULR No.", job.ulr_no],
+                  ["Certificate Type", job.certificate_type || "NABL"],
                   ["Method", job.method], ["Reference Standard", job.reference_standard],
                   ["Calibration Date", fmtDate(job.cal_date)], ["Issue Date", fmtDate(job.issue_date)],
                   ["Item Received", fmtDate(job.item_received_date)], ["Next Cal Due", fmtDate(job.recommended_next_date)],
@@ -163,6 +171,50 @@ export default function JobDetail() {
               {job.approval && <div className="mt-2 text-sm bg-emerald-50 rounded p-3"><b>Approved</b> by {job.approval.signatory_name} · {fmtDate(job.approval.date)}</div>}
             </Card>
           </div>
+        </TabsContent>
+
+        {/* SRF */}
+        <TabsContent value="srf">
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-head font-semibold">Service Request Form (SRF)</h3>
+              <div className="flex gap-2">
+                {isTech && !job.srf && <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={prepareSrf} data-testid="prepare-srf-btn"><FileText className="h-4 w-4 mr-1.5" /> Prepare SRF from Job</Button>}
+                {isTech && job.srf && ["prepared", "correction_requested"].includes(job.srf_status) && <Button size="sm" className="bg-amber-600 hover:bg-amber-700" onClick={sendSrf} data-testid="send-srf-btn"><Send className="h-4 w-4 mr-1.5" /> Send SRF to Customer</Button>}
+              </div>
+            </div>
+            {!job.srf && <p className="text-sm text-slate-400">No SRF yet. Prepare it from this job's Work Order reference & customer data.</p>}
+            {job.srf && (
+              <div className="space-y-3 text-sm">
+                <div className="flex flex-wrap gap-4">
+                  <span><span className="text-slate-500">SRF No:</span> <b className="font-mono">{job.srf.srf_no}</b></span>
+                  <span><span className="text-slate-500">WO Ref:</span> <b className="font-mono">{job.work_order_ref}</b></span>
+                  <span><span className="text-slate-500">Status:</span> <StatusBadge status={job.srf_status === "sent" ? "srf_sent" : job.srf_status === "approved" ? "srf_approved" : job.srf_status === "correction_requested" ? "srf_correction_requested" : job.srf_status === "rejected" ? "srf_rejected" : "srf_prepared"} /></span>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2 bg-slate-50 rounded p-3">
+                  <div><span className="text-xs text-slate-500">Customer</span><div className="font-medium">{job.srf.customer_name}</div></div>
+                  <div><span className="text-xs text-slate-500">Product / Serial</span><div className="font-medium">{job.srf.product_name} · {job.srf.serial_number}</div></div>
+                  <div><span className="text-xs text-slate-500">Certificate</span><div className="font-medium">{job.srf.certificate_type}</div></div>
+                  <div><span className="text-xs text-slate-500">Points (°C)</span><div className="font-mono">{(job.srf.calibration_points || []).join(", ")}</div></div>
+                </div>
+                {job.srf_token && (
+                  <div className="rounded bg-blue-50 border border-blue-200 p-3">
+                    <div className="text-xs uppercase tracking-wide text-blue-700 mb-1">Secure customer SRF link</div>
+                    <div className="flex items-center gap-2">
+                      <code className="text-xs font-mono truncate flex-1">{window.location.origin}/srf/{job.srf_token}</code>
+                      <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/srf/${job.srf_token}`); toast.success("Copied"); }}>Copy</Button>
+                      <Button size="sm" variant="outline" onClick={() => window.open(`/srf/${job.srf_token}`, "_blank")}>Open</Button>
+                    </div>
+                  </div>
+                )}
+                {job.srf_approval && (
+                  <div className={`rounded p-3 ${job.srf_status === "approved" ? "bg-emerald-50" : "bg-amber-50"}`} data-testid="srf-approval-evidence">
+                    <b>Customer {job.srf_approval.action.replace("_", " ")}</b> — {job.srf_approval.customer_name} · {fmtDate(job.srf_approval.date)} {job.srf_approval.comments && `· "${job.srf_approval.comments}"`}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
         </TabsContent>
 
         {/* READINGS */}
@@ -293,6 +345,25 @@ export default function JobDetail() {
 
         {/* CERTIFICATE */}
         <TabsContent value="certificate">
+          {preCheck && (
+            <Card className="p-5 mb-4" data-testid="pre-release-card">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck className={`h-5 w-5 ${preCheck.ready ? "text-emerald-600" : "text-amber-600"}`} />
+                <h3 className="font-head font-semibold">Pre-Release Verification</h3>
+                <span className={`ml-auto text-xs font-semibold px-2 py-0.5 rounded ${preCheck.ready ? "bg-emerald-600 text-white" : "bg-amber-100 text-amber-700"}`}>
+                  {preCheck.ready ? "READY TO RELEASE" : "INCOMPLETE"}
+                </span>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                {preCheck.checks.map((c, i) => (
+                  <div key={i} className="flex items-center gap-2" data-testid={`precheck-${i}`}>
+                    {c.ok ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-red-400" />}
+                    <span className={c.ok ? "text-slate-700" : "text-slate-500"}>{c.item}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
           <Card className="p-8 text-center">
             {job.certificate ? (
               <div>

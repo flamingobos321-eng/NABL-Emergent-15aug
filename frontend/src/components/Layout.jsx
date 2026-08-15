@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
 import {
   LayoutDashboard, Users2, Thermometer, ClipboardList, ShieldCheck,
-  ScrollText, LogOut, FlaskConical,
+  ScrollText, LogOut, FlaskConical, FileStack,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -85,10 +85,31 @@ const STATUS_STYLES = {
   valid: "bg-emerald-50 text-emerald-700",
   expiring: "bg-amber-50 text-amber-700",
   expired: "bg-red-50 text-red-700",
+  work_order_received: "bg-slate-100 text-slate-700",
+  lab_review: "bg-blue-50 text-blue-700",
+  srf_prepared: "bg-indigo-50 text-indigo-700",
+  srf_sent: "bg-amber-50 text-amber-700",
+  srf_correction_requested: "bg-orange-50 text-orange-700",
+  srf_rejected: "bg-red-50 text-red-700",
+  srf_approved: "bg-emerald-50 text-emerald-700",
+  calibration_in_progress: "bg-violet-50 text-violet-700",
+  completed: "bg-emerald-600 text-white",
+};
+
+const STATUS_LABELS = {
+  work_order_received: "New Work Order",
+  lab_review: "Lab Review",
+  srf_prepared: "SRF Prepared",
+  srf_sent: "Awaiting Customer",
+  srf_correction_requested: "Correction Requested",
+  srf_rejected: "SRF Rejected",
+  srf_approved: "Ready for Calibration",
+  calibration_in_progress: "Calibration In Progress",
+  completed: "Completed",
 };
 
 export function StatusBadge({ status }) {
-  const label = (status || "").replace(/_/g, " ");
+  const label = STATUS_LABELS[status] || (status || "").replace(/_/g, " ");
   return (
     <span data-testid={`status-${status}`}
       className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${

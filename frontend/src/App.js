@@ -10,6 +10,10 @@ import Masters from "@/pages/Masters";
 import Jobs from "@/pages/Jobs";
 import JobDetail from "@/pages/JobDetail";
 import NewJob from "@/pages/NewJob";
+import WorkOrders from "@/pages/WorkOrders";
+import NewWorkOrder from "@/pages/NewWorkOrder";
+import WorkOrderDetail from "@/pages/WorkOrderDetail";
+import SrfPublic from "@/pages/SrfPublic";
 import Users from "@/pages/Users";
 import Audit from "@/pages/Audit";
 import Verify from "@/pages/Verify";
@@ -32,6 +36,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/verify/:vid" element={<Verify />} />
+            <Route path="/srf/:token" element={<SrfPublic />} />
             <Route path="/" element={<Protected><Dashboard /></Protected>} />
             <Route path="/customers" element={<Protected><Customers /></Protected>} />
             <Route path="/masters" element={<Protected><Masters /></Protected>} />

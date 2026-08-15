@@ -127,7 +127,7 @@ def compute_point(master_readings, uut_readings, point_deviation, components,
         "s_mean": s_mean,
         "budget": budget,
         "combined_unc": combined_unc,             # Uc
-        "veff": veff,
+        "veff": veff if math.isfinite(veff) else None,
         "k": k,
         "expanded_unc": expanded_unc,             # calculated U = k*Uc
         "reported_uncertainty": reported_uncertainty,  # printed on certificate

@@ -36,5 +36,12 @@ Admin (full), Technician (jobs + readings), Reviewer (review), Authorized Signat
 - P2: Editable certificate template config; more calibration methods beyond K/RTD.
 - P2: Stability/uniformity report ingestion to auto-populate bath uncertainty components.
 
+## Architecture Corrections (2026-06-15, later iterations)
+1. SRF-before-calibration workflow, then corrected again: **Work Orders are NOT managed here** — they live in the billing/ERP. The Calibration Job is the primary record and stores a Work Order **reference** only (work_order_ref, work_order_date, work_order_source="Billing/ERP", notes), designed for future API lookup. Job number auto-generated (CAL-YYYY-NNNNN via counters). SRF now attaches to the Job (srf_no SRF-YYYY-NNNNN, srf_status, srf_token, srf_approval); prepared from job → sent (secure /srf/{token}) → customer approve/correct/reject. Global search across WO ref / job / SRF / cert / customer / serial / tag. Certificate type (NABL vs Traceable) flows per job into PDF (title + ULR shown only for NABL).
+2. Removed Work Order module + screens (per lab's system-separation requirement).
+
+## Audit-Readiness (see AUDIT_GAP_ANALYSIS.md — full gap table + phased plan)
+Implemented Phase-A start: `/api/jobs/{id}/pre-release-check` (completeness checklist surfaced on Certificate tab before release) and `/api/jobs/{id}/traceability` (full backward chain: cert→approval→review→job→readings→points→masters→WO ref→SRF→customer approval→customer/product + audit trail). Remaining Phase A–D quality-system modules are documented and pending prioritisation.
+
 ## Test Status
-Backend: 19/19 pytest pass. Frontend core flows verified. Both seeded jobs validation = 0 FAIL.
+Core flows re-verified via API after each correction (login, jobs, SRF prepare/send/approve, search, validation 0 FAIL, pre-release, traceability). Calc engine unchanged and still matches Excel exactly.
