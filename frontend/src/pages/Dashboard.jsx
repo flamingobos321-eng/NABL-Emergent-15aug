@@ -93,14 +93,14 @@ export default function Dashboard() {
         <Card className="lg:col-span-2 p-0 overflow-hidden">
           <div className="px-5 py-3 border-b"><h3 className="font-head font-semibold text-slate-900">Recent Calibration Jobs</h3></div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase"><tr>{["Job No.", "WO Ref", "Customer", "Cert Type", "Status"].map((h) => <th key={h} className="text-left px-5 py-2 font-medium">{h}</th>)}</tr></thead>
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase"><tr>{["Job No.", "WO Ref", "Customer", "Products", "Status"].map((h) => <th key={h} className="text-left px-5 py-2 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {(d.recent_jobs || []).map((j) => (
                 <tr key={j.id} onClick={() => navigate(`/jobs/${j.id}`)} className="border-t hover:bg-blue-50/40 cursor-pointer" data-testid={`recent-job-${j.id}`}>
                   <td className="px-5 py-2.5 font-mono text-slate-800">{j.job_no}</td>
                   <td className="px-5 py-2.5 font-mono text-xs text-slate-600">{j.work_order_ref}</td>
                   <td className="px-5 py-2.5 text-slate-700">{j.customer_name}</td>
-                  <td className="px-5 py-2.5"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded ${j.certificate_type === "NABL" ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-700"}`}>{j.certificate_type || "NABL"}</span></td>
+                  <td className="px-5 py-2.5"><span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">{j.product_count} product{j.product_count === 1 ? "" : "s"}</span></td>
                   <td className="px-5 py-2.5"><StatusBadge status={j.status} /></td>
                 </tr>
               ))}

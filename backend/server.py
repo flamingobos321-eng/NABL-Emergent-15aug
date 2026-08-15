@@ -39,10 +39,6 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def oid(x):
-    return str(x)
-
-
 def clean(doc):
     if not doc:
         return doc
@@ -152,27 +148,39 @@ class PointIn(BaseModel):
     excel_reference: Optional[dict] = None
 
 
+DEFAULT_ENV = {"humidity": "55 \u00b115 % RH", "ambient_temp": "25 \u00b14 \u00b0C"}
+
+
+class JobItemIn(BaseModel):
+    """One product within a calibration job — a full independent calibration record."""
+    item_id: Optional[str] = None
+    product_id: str
+    serial_number: str = ""
+    tag_number: str = ""
+    sr_number: str = ""
+    part_number: str = ""
+    url_number: str = ""
+    cert_no: str = ""
+    ulr_no: str = ""
+    certificate_type: str = "NABL"
+    method: str = "WI \u2013 TECH/11"
+    reference_standard: str = ""
+    cal_date: str = ""
+    issue_date: str = ""
+    item_received_date: str = ""
+    environmental: dict = Field(default_factory=lambda: dict(DEFAULT_ENV))
+    master_ids: List[str] = []
+    template_code: str = ""
+    points: List[PointIn] = []
+
+
 class JobCreate(BaseModel):
     job_no: str = ""
     work_order_ref: str = ""
     work_order_date: str = ""
     work_order_notes: str = ""
     customer_id: str
-    product_id: str
-    serial_number: str = ""
-    tag_number: str = ""
-    cal_date: str = ""
-    issue_date: str = ""
-    item_received_date: str = ""
-    cert_no: str = ""
-    ulr_no: str = ""
-    certificate_type: str = "NABL"
-    method: str = "WI \u2013 TECH/11"
-    reference_standard: str = ""
-    environmental: dict = Field(default_factory=lambda: {"humidity": "55 \u00b115 % RH", "ambient_temp": "25 \u00b14 \u00b0C"})
-    master_ids: List[str] = []
-    template_code: str = ""
-    points: List[PointIn] = []
+    items: List[JobItemIn] = []
 
 
 class ReadingsUpdate(BaseModel):
@@ -327,7 +335,7 @@ async def update_product(pid: str, body: ProductIn, user=Depends(require("admin"
 
 @api.delete("/products/{pid}")
 async def delete_product(pid: str, user=Depends(require("admin", "technician"))):
-    used = await db.jobs.count_documents({"product_id": pid})
+    used = await db.jobs.count_documents({"items.product_id": pid})
     if used > 0:
         await db.products.update_one({"_id": ObjectId(pid)}, {"$set": {"status": "archived"}})
         await audit("product", pid, "archive", user, reason=f"Used in {used} job(s) — archived, not deleted")
@@ -389,7 +397,7 @@ async def delete_master(mid: str, user=Depends(require("admin", "technician"))):
     m = await db.masters.find_one({"_id": ObjectId(mid)})
     if not m:
         raise HTTPException(status_code=404, detail="Master not found")
-    used = await db.jobs.count_documents({"master_ids": m.get("master_id")})
+    used = await db.jobs.count_documents({"items.master_ids": m.get("master_id")})
     if used > 0:
         await db.masters.update_one({"_id": ObjectId(mid)}, {"$set": {"status": "retired"}})
         await audit("master", mid, "retire", user, old=m.get("status"), new="retired",
@@ -400,14 +408,19 @@ async def delete_master(mid: str, user=Depends(require("admin", "technician"))):
     return {"archived": False, "message": "Master deleted."}
 
 
-
 # ---------------- Templates ----------------
 @api.get("/templates")
 async def list_templates(user=Depends(current_user)):
     return [clean(t) for t in await db.templates.find().to_list(100)]
 
 
-# ---------------- Jobs ----------------
+# ================= Jobs (container) + Items (per-product calibration records) =================
+async def next_seq(name):
+    doc = await db.counters.find_one_and_update(
+        {"_id": name}, {"$inc": {"seq": 1}}, upsert=True, return_document=ReturnDocument.AFTER)
+    return doc["seq"]
+
+
 async def hydrate_standards(master_ids):
     stds = []
     for mid in master_ids:
@@ -429,87 +442,90 @@ def next_cal_date(cal_date):
         return ""
 
 
-@api.get("/jobs")
-async def list_jobs(user=Depends(current_user)):
-    out = []
-    for j in await db.jobs.find().sort("created_at", -1).to_list(1000):
-        c = clean(j)
-        cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
-        prod = await db.products.find_one({"_id": ObjectId(c["product_id"])}) if c.get("product_id") else None
-        c["customer_name"] = cust["name"] if cust else ""
-        c["product_name"] = prod["name"] if prod else ""
-        out.append(c)
+STATUS_ORDER = ["draft", "readings_entered", "calculated", "in_review", "reviewed", "certified"]
+
+
+def job_rollup_status(job):
+    items = job.get("items", [])
+    if not items:
+        return "draft"
+    sts = [it.get("status", "draft") for it in items]
+    if all(s == "certified" for s in sts):
+        return "certified"
+    if any(s == "rejected" for s in sts):
+        return "rejected"
+    return min(sts, key=lambda s: STATUS_ORDER.index(s) if s in STATUS_ORDER else 0)
+
+
+async def build_item(data: dict):
+    """Prepare a fresh per-product calibration item document from an incoming payload."""
+    points = data.get("points", [])
+    points = [p if isinstance(p, dict) else p.model_dump() for p in points]
+    return {
+        "item_id": data.get("item_id") or uuid.uuid4().hex,
+        "product_id": data.get("product_id", ""),
+        "serial_number": data.get("serial_number", ""),
+        "tag_number": data.get("tag_number", ""),
+        "sr_number": data.get("sr_number", ""),
+        "part_number": data.get("part_number", ""),
+        "url_number": data.get("url_number", ""),
+        "cert_no": data.get("cert_no", ""),
+        "ulr_no": data.get("ulr_no", ""),
+        "certificate_type": data.get("certificate_type", "NABL"),
+        "method": data.get("method", "WI \u2013 TECH/11"),
+        "reference_standard": data.get("reference_standard", ""),
+        "cal_date": data.get("cal_date", ""),
+        "issue_date": data.get("issue_date", ""),
+        "item_received_date": data.get("item_received_date", ""),
+        "environmental": data.get("environmental") or dict(DEFAULT_ENV),
+        "master_ids": data.get("master_ids", []),
+        "template_code": data.get("template_code", ""),
+        "standards_used": await hydrate_standards(data.get("master_ids", [])),
+        "recommended_next_date": next_cal_date(data.get("cal_date", "")),
+        "points": points,
+        "computed": [],
+        "status": "draft",
+        "review": None,
+        "approval": None,
+        "certificate": None,
+    }
+
+
+def find_item(job, item_id):
+    for it in job.get("items", []):
+        if it.get("item_id") == item_id:
+            return it
+    return None
+
+
+async def replace_item(jid, items, item):
+    for i, it in enumerate(items):
+        if it["item_id"] == item["item_id"]:
+            items[i] = item
+            break
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"items": items}})
+
+
+async def _get_job_item(jid, item_id):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    it = find_item(j, item_id)
+    if not it:
+        raise HTTPException(status_code=404, detail="Product not found in this job")
+    return j, it
+
+
+async def hydrate_item(it):
+    prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else None
+    out = dict(it)
+    out["product"] = clean(prod) if prod else None
+    out["product_name"] = prod["name"] if prod else ""
     return out
 
 
-@api.get("/jobs/{jid}")
-async def get_job(jid: str, user=Depends(current_user)):
-    j = await db.jobs.find_one({"_id": ObjectId(jid)})
-    if not j:
-        raise HTTPException(status_code=404, detail="Job not found")
-    c = clean(j)
-    cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
-    prod = await db.products.find_one({"_id": ObjectId(c["product_id"])}) if c.get("product_id") else None
-    c["customer"] = clean(cust) if cust else None
-    c["product"] = clean(prod) if prod else None
-    return c
-
-
-@api.post("/jobs")
-async def create_job(body: JobCreate, user=Depends(require("admin", "technician"))):
-    if not body.work_order_ref.strip():
-        raise HTTPException(status_code=400, detail="Work Order Number is required")
-    doc = body.model_dump()
-    if not doc.get("job_no"):
-        doc["job_no"] = f"CAL-{datetime.now(timezone.utc).year}-{await next_seq('job'):05d}"
-    doc["work_order_source"] = "Billing/ERP"
-    doc["standards_used"] = await hydrate_standards(body.master_ids)
-    doc["recommended_next_date"] = next_cal_date(body.cal_date)
-    doc["status"] = "draft"
-    doc["srf"] = None
-    doc["srf_no"] = None
-    doc["srf_token"] = None
-    doc["srf_status"] = "none"
-    doc["srf_approval"] = None
-    doc["technician_id"] = user["id"]
-    doc["technician_name"] = user["name"]
-    doc["created_by"] = user["id"]
-    doc["created_at"] = now_iso()
-    doc["review"] = None
-    doc["approval"] = None
-    doc["certificate"] = None
-    res = await db.jobs.insert_one(doc)
-    await audit("job", res.inserted_id, "create", user, field="work_order_ref",
-                new=f"{doc['job_no']} (WO {body.work_order_ref})")
-    return clean(await db.jobs.find_one({"_id": res.inserted_id}))
-
-
-@api.put("/jobs/{jid}/readings")
-async def update_readings(jid: str, body: ReadingsUpdate, user=Depends(require("admin", "technician"))):
-    j = await db.jobs.find_one({"_id": ObjectId(jid)})
-    if not j:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if j.get("status") in ("approved", "certified"):
-        raise HTTPException(status_code=400, detail="Job is locked after approval")
-    old_points = j.get("points", [])
-    new_points = [p.model_dump() for p in body.points]
-    # audit changed readings
-    for i, np in enumerate(new_points):
-        op = old_points[i] if i < len(old_points) else {}
-        if op.get("master_readings") != np.get("master_readings"):
-            await audit("job", jid, "reading_change", user, field=f"point[{i}].master_readings",
-                        old=op.get("master_readings"), new=np.get("master_readings"))
-        if op.get("uut_readings") != np.get("uut_readings"):
-            await audit("job", jid, "reading_change", user, field=f"point[{i}].uut_readings",
-                        old=op.get("uut_readings"), new=np.get("uut_readings"))
-    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"points": new_points, "status": "readings_entered"}})
-    return clean(await db.jobs.find_one({"_id": ObjectId(jid)}))
-
-
-def compute_job(job):
-    points = job.get("points", [])
+def compute_points(points):
     results = []
-    all_pass = True
     for p in points:
         r = calcmod.compute_point(
             p["master_readings"], p["uut_readings"], p.get("point_deviation", 0.0),
@@ -525,96 +541,199 @@ def compute_job(job):
     return results
 
 
-@api.post("/jobs/{jid}/calculate")
-async def calculate(jid: str, user=Depends(current_user)):
+@api.get("/jobs")
+async def list_jobs(user=Depends(current_user)):
+    out = []
+    for j in await db.jobs.find().sort("created_at", -1).to_list(1000):
+        c = clean(j)
+        cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
+        items = c.get("items", [])
+        names = []
+        for it in items:
+            prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else None
+            names.append(prod["name"] if prod else "")
+        c["customer_name"] = cust["name"] if cust else ""
+        c["product_count"] = len(items)
+        c["certified_count"] = sum(1 for it in items if it.get("status") == "certified")
+        c["product_names"] = names
+        c["cal_date"] = items[0].get("cal_date") if items else ""
+        c["status"] = job_rollup_status(c)
+        out.append(c)
+    return out
+
+
+@api.get("/jobs/{jid}")
+async def get_job(jid: str, user=Depends(current_user)):
     j = await db.jobs.find_one({"_id": ObjectId(jid)})
     if not j:
         raise HTTPException(status_code=404, detail="Job not found")
-    results = compute_job(j)
-    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"computed": results, "status": "calculated"}})
+    c = clean(j)
+    cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
+    c["customer"] = clean(cust) if cust else None
+    c["items"] = [await hydrate_item(it) for it in c.get("items", [])]
+    c["status"] = job_rollup_status(c)
+    return c
+
+
+@api.post("/jobs")
+async def create_job(body: JobCreate, user=Depends(require("admin", "technician"))):
+    if not body.work_order_ref.strip():
+        raise HTTPException(status_code=400, detail="Work Order Number is required")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Add at least one product to the job")
+    items = [await build_item(it.model_dump()) for it in body.items]
+    doc = {
+        "job_no": body.job_no or f"CAL-{datetime.now(timezone.utc).year}-{await next_seq('job'):05d}",
+        "work_order_ref": body.work_order_ref, "work_order_date": body.work_order_date,
+        "work_order_notes": body.work_order_notes, "work_order_source": "Billing/ERP",
+        "customer_id": body.customer_id,
+        "items": items,
+        "srf": None, "srf_no": None, "srf_token": None, "srf_status": "none", "srf_approval": None,
+        "technician_id": user["id"], "technician_name": user["name"],
+        "created_by": user["id"], "created_at": now_iso(),
+    }
+    res = await db.jobs.insert_one(doc)
+    await audit("job", res.inserted_id, "create", user, field="work_order_ref",
+                new=f"{doc['job_no']} (WO {body.work_order_ref}) · {len(items)} product(s)")
+    return clean(await db.jobs.find_one({"_id": res.inserted_id}))
+
+
+@api.post("/jobs/{jid}/items")
+async def add_item(jid: str, body: JobItemIn, user=Depends(require("admin", "technician"))):
+    j = await db.jobs.find_one({"_id": ObjectId(jid)})
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found")
+    item = await build_item(body.model_dump())
+    items = j.get("items", []) + [item]
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"items": items}})
+    await audit("job", jid, "add_product", user, new=item["item_id"])
+    return {"ok": True, "item_id": item["item_id"]}
+
+
+@api.delete("/jobs/{jid}/items/{item_id}")
+async def delete_item(jid: str, item_id: str, user=Depends(require("admin", "technician"))):
+    j, it = await _get_job_item(jid, item_id)
+    if it.get("status") == "certified":
+        raise HTTPException(status_code=400, detail="Cannot remove a certified product")
+    items = [x for x in j.get("items", []) if x["item_id"] != item_id]
+    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"items": items}})
+    await audit("job", jid, "remove_product", user, old=item_id)
+    return {"ok": True}
+
+
+@api.put("/jobs/{jid}/items/{item_id}/readings")
+async def update_readings(jid: str, item_id: str, body: ReadingsUpdate, user=Depends(require("admin", "technician"))):
+    j, it = await _get_job_item(jid, item_id)
+    if it.get("status") in ("approved", "certified"):
+        raise HTTPException(status_code=400, detail="Product is locked after approval")
+    old_points = it.get("points", [])
+    new_points = [p.model_dump() for p in body.points]
+    for i, np in enumerate(new_points):
+        op = old_points[i] if i < len(old_points) else {}
+        if op.get("master_readings") != np.get("master_readings"):
+            await audit("job", jid, "reading_change", user, field=f"item[{item_id}].point[{i}].master_readings",
+                        old=op.get("master_readings"), new=np.get("master_readings"))
+        if op.get("uut_readings") != np.get("uut_readings"):
+            await audit("job", jid, "reading_change", user, field=f"item[{item_id}].point[{i}].uut_readings",
+                        old=op.get("uut_readings"), new=np.get("uut_readings"))
+    it["points"] = new_points
+    it["status"] = "readings_entered"
+    await replace_item(jid, j["items"], it)
+    return {"ok": True}
+
+
+@api.post("/jobs/{jid}/items/{item_id}/calculate")
+async def calculate_item(jid: str, item_id: str, user=Depends(current_user)):
+    j, it = await _get_job_item(jid, item_id)
+    results = compute_points(it.get("points", []))
+    it["computed"] = results
+    if it.get("status") in ("draft", "readings_entered"):
+        it["status"] = "calculated"
+    await replace_item(jid, j["items"], it)
     return {"results": results}
 
 
-@api.post("/jobs/{jid}/submit-review")
-async def submit_review(jid: str, user=Depends(require("admin", "technician"))):
-    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"status": "in_review"}})
-    await audit("job", jid, "submit_review", user)
+@api.post("/jobs/{jid}/items/{item_id}/submit-review")
+async def submit_review(jid: str, item_id: str, user=Depends(require("admin", "technician"))):
+    j, it = await _get_job_item(jid, item_id)
+    it["status"] = "in_review"
+    await replace_item(jid, j["items"], it)
+    await audit("job", jid, "submit_review", user, field=item_id)
     return {"ok": True}
 
 
-@api.post("/jobs/{jid}/review")
-async def review(jid: str, body: ReviewIn, user=Depends(require("admin", "reviewer"))):
-    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {
-        "status": "reviewed",
-        "review": {"reviewer_id": user["id"], "reviewer_name": user["name"], "date": now_iso(), "comments": body.comments},
-    }})
-    await audit("job", jid, "review", user, reason=body.comments)
+@api.post("/jobs/{jid}/items/{item_id}/review")
+async def review_item(jid: str, item_id: str, body: ReviewIn, user=Depends(require("admin", "reviewer"))):
+    j, it = await _get_job_item(jid, item_id)
+    it["status"] = "reviewed"
+    it["review"] = {"reviewer_id": user["id"], "reviewer_name": user["name"], "date": now_iso(), "comments": body.comments}
+    await replace_item(jid, j["items"], it)
+    await audit("job", jid, "review", user, field=item_id, reason=body.comments)
     return {"ok": True}
 
 
-@api.post("/jobs/{jid}/reject")
-async def reject(jid: str, body: RejectIn, user=Depends(require("admin", "reviewer", "signatory"))):
-    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"status": "rejected", "reject_reason": body.reason}})
-    await audit("job", jid, "reject", user, reason=body.reason)
+@api.post("/jobs/{jid}/items/{item_id}/reject")
+async def reject_item(jid: str, item_id: str, body: RejectIn, user=Depends(require("admin", "reviewer", "signatory"))):
+    j, it = await _get_job_item(jid, item_id)
+    it["status"] = "rejected"
+    it["reject_reason"] = body.reason
+    await replace_item(jid, j["items"], it)
+    await audit("job", jid, "reject", user, field=item_id, reason=body.reason)
     return {"ok": True}
 
 
-@api.post("/jobs/{jid}/approve")
-async def approve(jid: str, user=Depends(require("admin", "signatory"))):
-    j = await db.jobs.find_one({"_id": ObjectId(jid)})
-    if not j:
-        raise HTTPException(status_code=404, detail="Job not found")
-    # validate masters
-    for mid in j.get("master_ids", []):
+@api.post("/jobs/{jid}/items/{item_id}/approve")
+async def approve_item(jid: str, item_id: str, user=Depends(require("admin", "signatory"))):
+    j, it = await _get_job_item(jid, item_id)
+    for mid in it.get("master_ids", []):
         m = await db.masters.find_one({"master_id": mid})
         if m and master_status(m) == "expired":
             raise HTTPException(status_code=400, detail=f"Master {mid} calibration expired; cannot approve")
     verify_id = uuid.uuid4().hex[:12]
-    cert = {
-        "cert_no": j.get("cert_no"), "ulr_no": j.get("ulr_no"),
-        "verification_id": verify_id, "issued_date": now_iso(),
-        "issued_by": user["name"], "status": "issued",
-    }
-    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {
-        "status": "certified",
-        "approval": {"signatory_id": user["id"], "signatory_name": user["name"], "date": now_iso()},
-        "certificate": cert,
-    }})
-    await audit("job", jid, "approve_certify", user, new=verify_id)
+    cert = {"cert_no": it.get("cert_no"), "ulr_no": it.get("ulr_no"),
+            "verification_id": verify_id, "issued_date": now_iso(),
+            "issued_by": user["name"], "status": "issued"}
+    it["status"] = "certified"
+    it["approval"] = {"signatory_id": user["id"], "signatory_name": user["name"], "date": now_iso()}
+    it["certificate"] = cert
+    await replace_item(jid, j["items"], it)
+    await audit("job", jid, "approve_certify", user, field=item_id, new=verify_id)
     return {"ok": True, "certificate": cert}
 
 
-@api.post("/jobs/{jid}/cancel-certificate")
-async def cancel_cert(jid: str, body: RejectIn, user=Depends(require("admin", "signatory"))):
-    await db.jobs.update_one({"_id": ObjectId(jid)}, {"$set": {"certificate.status": "cancelled", "certificate.cancel_reason": body.reason}})
-    await audit("job", jid, "cancel_certificate", user, reason=body.reason)
+@api.post("/jobs/{jid}/items/{item_id}/cancel-certificate")
+async def cancel_cert(jid: str, item_id: str, body: RejectIn, user=Depends(require("admin", "signatory"))):
+    j, it = await _get_job_item(jid, item_id)
+    if it.get("certificate"):
+        it["certificate"]["status"] = "cancelled"
+        it["certificate"]["cancel_reason"] = body.reason
+    await replace_item(jid, j["items"], it)
+    await audit("job", jid, "cancel_certificate", user, field=item_id, reason=body.reason)
     return {"ok": True}
 
 
-@api.get("/jobs/{jid}/certificate/pdf")
-async def cert_pdf(jid: str, user=Depends(current_user)):
-    j = await db.jobs.find_one({"_id": ObjectId(jid)})
-    if not j or not j.get("certificate"):
+@api.get("/jobs/{jid}/items/{item_id}/certificate/pdf")
+async def cert_pdf(jid: str, item_id: str, user=Depends(current_user)):
+    j, it = await _get_job_item(jid, item_id)
+    if not it.get("certificate"):
         raise HTTPException(status_code=404, detail="Certificate not issued")
     cust = await db.customers.find_one({"_id": ObjectId(j["customer_id"])})
-    prod = await db.products.find_one({"_id": ObjectId(j["product_id"])})
-    results = compute_job(j)
-    verify_url = f"{os.environ.get('FRONTEND_URL','')}/verify/{j['certificate']['verification_id']}"
-    pdf = build_certificate_pdf(j, clean(cust), clean(prod), results, verify_url,
-                                cert_type=j.get("certificate_type", "NABL"))
+    prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else None
+    results = compute_points(it.get("points", []))
+    pdf_job = {**it, "job_no": j.get("job_no"), "work_order_ref": j.get("work_order_ref")}
+    verify_url = f"{os.environ.get('FRONTEND_URL','')}/verify/{it['certificate']['verification_id']}"
+    pdf = build_certificate_pdf(pdf_job, clean(cust) if cust else {}, clean(prod) if prod else {}, results,
+                                verify_url, cert_type=it.get("certificate_type", "NABL"))
     return StreamingResponse(pdf, media_type="application/pdf", headers={
-        "Content-Disposition": f'inline; filename="certificate_{j.get("cert_no","cert").replace("/","_")}.pdf"'})
+        "Content-Disposition": f'inline; filename="certificate_{(it.get("cert_no") or "cert").replace("/","_")}.pdf"'})
 
 
-# ---------------- Excel vs App validation ----------------
-@api.get("/jobs/{jid}/validation")
-async def validation(jid: str, user=Depends(current_user)):
-    j = await db.jobs.find_one({"_id": ObjectId(jid)})
-    if not j:
-        raise HTTPException(status_code=404, detail="Job not found")
+@api.get("/jobs/{jid}/items/{item_id}/validation")
+async def validation(jid: str, item_id: str, user=Depends(current_user)):
+    j, it = await _get_job_item(jid, item_id)
     rows = []
     has_ref = False
-    for p in j.get("points", []):
+    for p in it.get("points", []):
         ref = p.get("excel_reference")
         r = calcmod.compute_point(p["master_readings"], p["uut_readings"], p.get("point_deviation", 0.0),
                                   p["components"], p.get("cmc_floor"))
@@ -643,32 +762,57 @@ async def validation(jid: str, user=Depends(current_user)):
     return {"has_reference": has_ref, "rows": rows}
 
 
-# ---------------- Sequence counters ----------------
-async def next_seq(name):
-    doc = await db.counters.find_one_and_update(
-        {"_id": name}, {"$inc": {"seq": 1}}, upsert=True, return_document=ReturnDocument.AFTER)
-    return doc["seq"]
+@api.get("/jobs/{jid}/items/{item_id}/pre-release-check")
+async def pre_release_check(jid: str, item_id: str, user=Depends(current_user)):
+    j, it = await _get_job_item(jid, item_id)
+    checks = []
+    def add(label, ok):
+        checks.append({"item": label, "ok": bool(ok)})
+    pts = it.get("points", [])
+    mv = True
+    for mid in it.get("master_ids", []):
+        m = await db.masters.find_one({"master_id": mid})
+        if m and master_status(m) == "expired":
+            mv = False
+    add("Product selected", it.get("product_id"))
+    add("Serial / Tag number present", it.get("serial_number") or it.get("tag_number"))
+    add("Work Order reference present", j.get("work_order_ref"))
+    add("Calibration points present", len(pts) > 0)
+    add("Master / reference selected", len(it.get("master_ids", [])) > 0)
+    add("All masters within validity", mv)
+    add("Readings complete (non-zero)", bool(pts) and all(any(r for r in p.get("uut_readings", [])) for p in pts))
+    add("Technical review completed", it.get("review") is not None)
+    add("SRF customer-approved", j.get("srf_status") == "approved")
+    return {"ready": all(c["ok"] for c in checks), "checks": checks}
 
 
-# ---------------- SRF (attached to Calibration Job) ----------------
+# ---------------- SRF (attached to the Calibration Job / Work Order) ----------------
 @api.post("/jobs/{jid}/prepare-srf")
 async def prepare_job_srf(jid: str, user=Depends(require("admin", "technician"))):
     j = await db.jobs.find_one({"_id": ObjectId(jid)})
     if not j:
         raise HTTPException(status_code=404, detail="Job not found")
     cust = await db.customers.find_one({"_id": ObjectId(j["customer_id"])}) if j.get("customer_id") else {}
-    prod = await db.products.find_one({"_id": ObjectId(j["product_id"])}) if j.get("product_id") else {}
-    cust = cust or {}; prod = prod or {}
+    cust = cust or {}
+    products = []
+    for it in j.get("items", []):
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else {}
+        prod = prod or {}
+        products.append({
+            "product_name": prod.get("name", ""),
+            "serial_number": it.get("serial_number", ""),
+            "tag_number": it.get("tag_number", ""),
+            "range": prod.get("range", ""),
+            "certificate_type": it.get("certificate_type", "NABL"),
+            "calibration_points": [p.get("nominal") for p in it.get("points", [])],
+        })
     srf_no = j.get("srf_no") or f"SRF-{datetime.now(timezone.utc).year}-{await next_seq('srf'):05d}"
     srf = {
         "srf_no": srf_no,
         "customer_name": cust.get("name", ""), "address": cust.get("address", ""),
         "contact": cust.get("contact", ""), "email": cust.get("email", ""), "phone": cust.get("phone", ""),
         "work_order_ref": j.get("work_order_ref", ""),
-        "product_name": prod.get("name", ""), "serial_number": j.get("serial_number", ""),
-        "tag_number": j.get("tag_number", ""), "range": prod.get("range", ""),
-        "certificate_type": j.get("certificate_type", "NABL"),
-        "calibration_points": [p.get("nominal") for p in j.get("points", [])],
+        "products": products,
         "calibration_requirement": "As per customer specification",
         "lab_notes": (j.get("srf") or {}).get("lab_notes", ""),
         "prepared_by": user["name"], "prepared_at": now_iso(),
@@ -739,18 +883,23 @@ async def search(q: str = "", user=Depends(current_user)):
     rx = {"$regex": re.escape(q), "$options": "i"}
     cust_ids = [str(c["_id"]) for c in await db.customers.find({"name": rx}).to_list(200)]
     query = {"$or": [
-        {"job_no": rx}, {"work_order_ref": rx}, {"serial_number": rx}, {"tag_number": rx},
-        {"srf_no": rx}, {"cert_no": rx}, {"certificate.cert_no": rx}, {"certificate.verification_id": rx},
+        {"job_no": rx}, {"work_order_ref": rx}, {"srf_no": rx},
+        {"items.serial_number": rx}, {"items.tag_number": rx}, {"items.sr_number": rx},
+        {"items.cert_no": rx}, {"items.certificate.cert_no": rx}, {"items.certificate.verification_id": rx},
     ]}
     if cust_ids:
         query["$or"].append({"customer_id": {"$in": cust_ids}})
     out = []
     for j in await db.jobs.find(query).sort("created_at", -1).to_list(100):
         cust = await db.customers.find_one({"_id": ObjectId(j["customer_id"])}) if j.get("customer_id") else None
+        items = j.get("items", [])
         out.append({"id": str(j["_id"]), "job_no": j.get("job_no"), "work_order_ref": j.get("work_order_ref"),
-                    "srf_no": j.get("srf_no"), "cert_no": (j.get("certificate") or {}).get("cert_no"),
-                    "customer_name": cust["name"] if cust else "", "serial_number": j.get("serial_number"),
-                    "certificate_type": j.get("certificate_type"), "status": j.get("status")})
+                    "srf_no": j.get("srf_no"),
+                    "cert_no": ", ".join([it.get("cert_no", "") for it in items if it.get("cert_no")]),
+                    "customer_name": cust["name"] if cust else "",
+                    "serial_number": ", ".join([it.get("serial_number", "") for it in items if it.get("serial_number")]),
+                    "product_count": len(items),
+                    "status": job_rollup_status(j)})
     return {"jobs": out}
 
 
@@ -764,17 +913,19 @@ async def dashboard(user=Depends(current_user)):
               "certificates_issued": 0, "today_jobs": 0}
     srf_pipeline = {"no_srf": 0, "prepared": 0, "awaiting_customer": 0, "approved": 0, "correction": 0}
     for j in jobs:
-        s = j.get("status")
-        if s in ("draft", "readings_entered"):
-            counts["pending_readings"] += 1
-        if s in ("in_review",):
-            counts["pending_review"] += 1
-        if s in ("reviewed", "calculated"):
-            counts["pending_approval"] += 1
-        if s == "certified":
-            counts["certificates_issued"] += 1
-        if (j.get("cal_date") or "")[:10] == today:
-            counts["today_jobs"] += 1
+        # per-product (item) counts
+        for it in j.get("items", []):
+            s = it.get("status")
+            if s in ("draft", "readings_entered"):
+                counts["pending_readings"] += 1
+            if s == "in_review":
+                counts["pending_review"] += 1
+            if s in ("reviewed", "calculated"):
+                counts["pending_approval"] += 1
+            if s == "certified":
+                counts["certificates_issued"] += 1
+            if (it.get("cal_date") or "")[:10] == today:
+                counts["today_jobs"] += 1
         ss = j.get("srf_status") or "none"
         if ss == "none":
             srf_pipeline["no_srf"] += 1
@@ -797,9 +948,11 @@ async def dashboard(user=Depends(current_user)):
     for j in sorted(jobs, key=lambda x: x.get("created_at", ""), reverse=True)[:8]:
         c = clean(j)
         cust = await db.customers.find_one({"_id": ObjectId(c["customer_id"])}) if c.get("customer_id") else None
+        items = c.get("items", [])
         recent.append({"id": c["id"], "job_no": c.get("job_no"), "work_order_ref": c.get("work_order_ref"),
-                       "customer_name": cust["name"] if cust else "", "status": c.get("status"),
-                       "certificate_type": c.get("certificate_type"), "cal_date": c.get("cal_date")})
+                       "customer_name": cust["name"] if cust else "", "status": job_rollup_status(c),
+                       "product_count": len(items),
+                       "cal_date": items[0].get("cal_date") if items else ""})
     counts["masters_expiring"] = len(expiring)
     counts["masters_expired"] = len(expired)
     return {"counts": counts, "srf_pipeline": srf_pipeline, "expiring_masters": expiring,
@@ -814,63 +967,40 @@ async def get_audit(entity_id: Optional[str] = None, user=Depends(current_user))
     return [clean(l) for l in logs]
 
 
-@api.get("/jobs/{jid}/pre-release-check")
-async def pre_release_check(jid: str, user=Depends(current_user)):
-    j = await db.jobs.find_one({"_id": ObjectId(jid)})
-    if not j:
-        raise HTTPException(status_code=404, detail="Job not found")
-    checks = []
-    def add(label, ok):
-        checks.append({"item": label, "ok": bool(ok)})
-    pts = j.get("points", [])
-    mv = True
-    for mid in j.get("master_ids", []):
-        m = await db.masters.find_one({"master_id": mid})
-        if m and master_status(m) == "expired":
-            mv = False
-    add("Customer selected", j.get("customer_id"))
-    add("Product selected", j.get("product_id"))
-    add("Serial / Tag number present", j.get("serial_number") or j.get("tag_number"))
-    add("Work Order reference present", j.get("work_order_ref"))
-    add("Calibration points present", len(pts) > 0)
-    add("Master / reference selected", len(j.get("master_ids", [])) > 0)
-    add("All masters within validity", mv)
-    add("Readings complete (non-zero)", bool(pts) and all(any(r for r in p.get("uut_readings", [])) for p in pts))
-    add("Technical review completed", j.get("review") is not None)
-    add("SRF customer-approved", j.get("srf_status") == "approved")
-    return {"ready": all(c["ok"] for c in checks), "checks": checks}
-
-
 @api.get("/jobs/{jid}/traceability")
 async def traceability(jid: str, user=Depends(current_user)):
     j = await db.jobs.find_one({"_id": ObjectId(jid)})
     if not j:
         raise HTTPException(status_code=404, detail="Job not found")
     cust = await db.customers.find_one({"_id": ObjectId(j["customer_id"])}) if j.get("customer_id") else None
-    prod = await db.products.find_one({"_id": ObjectId(j["product_id"])}) if j.get("product_id") else None
-    masters = []
-    for mid in j.get("master_ids", []):
-        m = await db.masters.find_one({"master_id": mid})
-        if m:
-            mc = clean(m)
-            mc["validity_status"] = master_status(m)
-            masters.append(mc)
     logs = [clean(l) for l in await db.audit_logs.find({"entity_id": jid}).sort("timestamp", 1).to_list(1000)]
+    items_out = []
+    for it in j.get("items", []):
+        prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else None
+        masters = []
+        for mid in it.get("master_ids", []):
+            m = await db.masters.find_one({"master_id": mid})
+            if m:
+                mc = clean(m)
+                mc["validity_status"] = master_status(m)
+                masters.append(mc)
+        items_out.append({
+            "item_id": it.get("item_id"),
+            "product": clean(prod) if prod else None,
+            "certificate": it.get("certificate"), "certificate_type": it.get("certificate_type"),
+            "approval": it.get("approval"), "review": it.get("review"),
+            "cal_date": it.get("cal_date"), "method": it.get("method"),
+            "calibration_points": [{"label": p.get("point_label"), "nominal": p.get("nominal")} for p in it.get("points", [])],
+            "masters": masters,
+            "readings": [{"point": p.get("point_label"), "master_readings": p.get("master_readings"),
+                          "uut_readings": p.get("uut_readings")} for p in it.get("points", [])],
+        })
     return {
-        "certificate": j.get("certificate"),
-        "certificate_type": j.get("certificate_type"),
-        "approval": j.get("approval"), "review": j.get("review"),
-        "job": {"id": jid, "job_no": j.get("job_no"), "status": j.get("status"),
-                "cal_date": j.get("cal_date"), "method": j.get("method"),
-                "environmental": j.get("environmental")},
+        "job": {"id": jid, "job_no": j.get("job_no"), "status": job_rollup_status(j)},
         "work_order_ref": j.get("work_order_ref"), "work_order_source": j.get("work_order_source"),
         "srf": {"srf_no": j.get("srf_no"), "status": j.get("srf_status"), "approval": j.get("srf_approval")},
         "customer": clean(cust) if cust else None,
-        "product": clean(prod) if prod else None,
-        "calibration_points": [{"label": p.get("point_label"), "nominal": p.get("nominal")} for p in j.get("points", [])],
-        "masters": masters,
-        "readings": [{"point": p.get("point_label"), "master_readings": p.get("master_readings"),
-                      "uut_readings": p.get("uut_readings")} for p in j.get("points", [])],
+        "items": items_out,
         "audit_trail": logs,
     }
 
@@ -1031,31 +1161,36 @@ async def download_document_file(did: str, request: Request, authorization: str 
                     headers={"Content-Disposition": f'inline; filename="{att.get("file_name", "document")}"'})
 
 
-
-
 # ---------------- Public verification ----------------
 @api.get("/verify/{verification_id}")
 async def verify(verification_id: str):
-    j = await db.jobs.find_one({"certificate.verification_id": verification_id})
+    j = await db.jobs.find_one({"items.certificate.verification_id": verification_id})
     if not j:
         raise HTTPException(status_code=404, detail="Certificate not found")
-    cert = j.get("certificate", {})
-    prod = await db.products.find_one({"_id": ObjectId(j["product_id"])}) if j.get("product_id") else None
+    it = None
+    for x in j.get("items", []):
+        if (x.get("certificate") or {}).get("verification_id") == verification_id:
+            it = x
+            break
+    if not it:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+    cert = it.get("certificate", {})
+    prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else None
     return {
         "found": True,
         "job_no": j.get("job_no"),
         "work_order_ref": j.get("work_order_ref"),
         "certificate_no": cert.get("cert_no"),
         "ulr_no": cert.get("ulr_no"),
-        "certificate_type": j.get("certificate_type", "NABL"),
+        "certificate_type": it.get("certificate_type", "NABL"),
         "status": cert.get("status"),
         "issued_date": cert.get("issued_date"),
-        "cal_date": j.get("cal_date"),
-        "recommended_next_date": j.get("recommended_next_date"),
+        "cal_date": it.get("cal_date"),
+        "recommended_next_date": it.get("recommended_next_date"),
         "item": prod["name"] if prod else "",
         "item_type": prod.get("type") if prod else "",
-        "serial_number": j.get("serial_number"),
-        "points": len(j.get("points", [])),
+        "serial_number": it.get("serial_number"),
+        "points": len(it.get("points", [])),
     }
 
 
@@ -1074,6 +1209,52 @@ app.add_middleware(
 )
 
 
+# ---------------- Migration: single-product jobs -> multi-product items[] ----------------
+async def migrate_jobs_to_items():
+    legacy_fields = ["product_id", "serial_number", "tag_number", "sr_number", "part_number",
+                     "url_number", "cert_no", "ulr_no", "certificate_type", "template_code",
+                     "reference_standard", "method", "cal_date", "issue_date", "item_received_date",
+                     "recommended_next_date", "environmental", "master_ids", "standards_used",
+                     "points", "computed", "review", "approval", "certificate", "reject_reason"]
+    migrated = 0
+    async for j in db.jobs.find({"items": {"$exists": False}}):
+        item = {
+            "item_id": uuid.uuid4().hex,
+            "product_id": j.get("product_id", ""),
+            "serial_number": j.get("serial_number", ""),
+            "tag_number": j.get("tag_number", ""),
+            "sr_number": j.get("sr_number", ""),
+            "part_number": j.get("part_number", ""),
+            "url_number": j.get("url_number", ""),
+            "cert_no": j.get("cert_no", ""),
+            "ulr_no": j.get("ulr_no", ""),
+            "certificate_type": j.get("certificate_type", "NABL"),
+            "method": j.get("method", "WI \u2013 TECH/11"),
+            "reference_standard": j.get("reference_standard", ""),
+            "cal_date": j.get("cal_date", ""),
+            "issue_date": j.get("issue_date", ""),
+            "item_received_date": j.get("item_received_date", ""),
+            "environmental": j.get("environmental") or dict(DEFAULT_ENV),
+            "master_ids": j.get("master_ids", []),
+            "template_code": j.get("template_code", ""),
+            "standards_used": j.get("standards_used", []),
+            "recommended_next_date": j.get("recommended_next_date", ""),
+            "points": j.get("points", []),
+            "computed": j.get("computed", []),
+            "status": j.get("status", "draft"),
+            "review": j.get("review"),
+            "approval": j.get("approval"),
+            "certificate": j.get("certificate"),
+        }
+        await db.jobs.update_one({"_id": j["_id"]}, {
+            "$set": {"items": [item]},
+            "$unset": {f: "" for f in legacy_fields + ["status"]},
+        })
+        migrated += 1
+    if migrated:
+        logger.info(f"Migrated {migrated} legacy job(s) into multi-product structure")
+
+
 # ---------------- Seeding ----------------
 async def seed():
     await db.users.create_index("email", unique=True)
@@ -1087,7 +1268,6 @@ async def seed():
     elif not authmod.verify_password(admin_pw, existing["password_hash"]):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": authmod.hash_password(admin_pw)}})
 
-    # demo users for each role
     demo = [("technician@yog.local", "Tech@2026", "Nilesh Bodakhe", "technician"),
             ("reviewer@yog.local", "Review@2026", "Quality Reviewer", "reviewer"),
             ("signatory@yog.local", "Sign@2026", "A. A. Kothe", "signatory"),
@@ -1112,7 +1292,8 @@ async def seed():
                 "history": [{"action": "seeded", "by": "System", "at": now_iso(), "note": ""}]})
 
     if await db.jobs.count_documents({}) > 0:
-        return  # already seeded
+        await migrate_jobs_to_items()
+        return
 
     with open(ROOT_DIR / "seed_data.json") as f:
         data = json.load(f)
@@ -1132,7 +1313,7 @@ async def seed():
         key = p.pop("key")
         ckey = p.pop("customer_key")
         p["customer_id"] = cust_map[ckey]
-        res = await db.products.insert_one({**p, "created_at": now_iso()})
+        res = await db.products.insert_one({**p, "status": "active", "created_at": now_iso()})
         prod_map[key] = str(res.inserted_id)
 
     for t in data["templates"]:
@@ -1142,24 +1323,45 @@ async def seed():
     for j in data["jobs"]:
         ckey = j.pop("customer_key")
         pkey = j.pop("product_key")
-        j["customer_id"] = cust_map[ckey]
-        j["product_id"] = prod_map[pkey]
-        j["standards_used"] = await hydrate_standards(j.get("master_ids", []))
-        j["recommended_next_date"] = next_cal_date(j.get("cal_date", ""))
-        j["status"] = "readings_entered"
-        j["work_order_ref"] = j.get("work_order_ref") or "WO-2026-00458"
-        j["work_order_source"] = "Billing/ERP"
-        j["srf"] = None
-        j["srf_no"] = None
-        j["srf_token"] = None
-        j["srf_status"] = "none"
-        j["srf_approval"] = None
-        j["technician_name"] = "Nilesh Bodakhe"
-        j["review"] = None
-        j["approval"] = None
-        j["certificate"] = None
-        j["created_at"] = now_iso()
-        await db.jobs.insert_one(j)
+        item = {
+            "item_id": uuid.uuid4().hex,
+            "product_id": prod_map[pkey],
+            "serial_number": j.get("serial_number", ""),
+            "tag_number": j.get("tag_number", ""),
+            "sr_number": j.get("sr_number", ""),
+            "part_number": j.get("part_number", ""),
+            "url_number": j.get("url_number", ""),
+            "cert_no": j.get("cert_no", ""),
+            "ulr_no": j.get("ulr_no", ""),
+            "certificate_type": j.get("certificate_type", "NABL"),
+            "method": j.get("method", "WI \u2013 TECH/11"),
+            "reference_standard": j.get("reference_standard", ""),
+            "cal_date": j.get("cal_date", ""),
+            "issue_date": j.get("issue_date", ""),
+            "item_received_date": j.get("item_received_date", ""),
+            "environmental": j.get("environmental") or dict(DEFAULT_ENV),
+            "master_ids": j.get("master_ids", []),
+            "template_code": j.get("template_code", ""),
+            "standards_used": await hydrate_standards(j.get("master_ids", [])),
+            "recommended_next_date": next_cal_date(j.get("cal_date", "")),
+            "points": j.get("points", []),
+            "computed": [],
+            "status": "readings_entered",
+            "review": None,
+            "approval": None,
+            "certificate": None,
+        }
+        doc = {
+            "job_no": j.get("job_no"),
+            "work_order_ref": j.get("work_order_ref") or "WO-2026-00458",
+            "work_order_date": "", "work_order_notes": "", "work_order_source": "Billing/ERP",
+            "customer_id": cust_map[ckey],
+            "items": [item],
+            "srf": None, "srf_no": None, "srf_token": None, "srf_status": "none", "srf_approval": None,
+            "technician_name": "Nilesh Bodakhe",
+            "created_at": now_iso(),
+        }
+        await db.jobs.insert_one(doc)
 
     logger.info("Seed complete")
 

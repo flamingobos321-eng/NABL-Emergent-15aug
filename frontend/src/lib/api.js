@@ -30,6 +30,6 @@ export function formatApiError(detail) {
   return String(detail);
 }
 
-export const PDF_URL = (jid) => `${API}/jobs/${jid}/certificate/pdf`;
+export const PDF_URL = (jid, itemId) => `${API}/jobs/${jid}/items/${itemId}/certificate/pdf`;
 export { API };
 export default api;

@@ -5,7 +5,7 @@ import { PageHeader, StatusBadge } from "@/components/Layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
-import { Plus } from "lucide-react";
+import { Plus, Package } from "lucide-react";
 
 export default function Jobs() {
   const { user } = useAuth();
@@ -16,7 +16,7 @@ export default function Jobs() {
 
   return (
     <div>
-      <PageHeader title="Calibration Jobs" subtitle="All calibration activities and certificates"
+      <PageHeader title="Calibration Jobs" subtitle="Each job (Work Order) can hold multiple products, each independently certified"
         actions={canCreate && (
           <Button className="bg-blue-600 hover:bg-blue-700" data-testid="new-job-btn" onClick={() => navigate("/jobs/new")}>
             <Plus className="h-4 w-4 mr-1.5" /> New Job
@@ -26,7 +26,7 @@ export default function Jobs() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
             <tr>
-              {["Job No.", "Customer", "Item S/N", "Cal Date", "Points", "Status"].map((h) => (
+              {["Job No.", "Work Order", "Customer", "Products", "Cal Date", "Status"].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 font-medium">{h}</th>
               ))}
             </tr>
@@ -36,10 +36,14 @@ export default function Jobs() {
               <tr key={j.id} onClick={() => navigate(`/jobs/${j.id}`)}
                 className="border-t hover:bg-blue-50/40 cursor-pointer" data-testid={`job-row-${j.id}`}>
                 <td className="px-4 py-3 font-mono font-semibold text-slate-800">{j.job_no}</td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-600">{j.work_order_ref || "—"}</td>
                 <td className="px-4 py-3 text-slate-700">{j.customer_name}</td>
-                <td className="px-4 py-3 font-mono text-xs text-slate-600">{j.serial_number}</td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700" data-testid={`job-product-count-${j.id}`}>
+                    <Package className="h-3 w-3" /> {j.product_count} · {j.certified_count} certified
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-slate-600">{fmtDate(j.cal_date)}</td>
-                <td className="px-4 py-3 font-mono">{(j.points || []).length}</td>
                 <td className="px-4 py-3"><StatusBadge status={j.status} /></td>
               </tr>
             ))}

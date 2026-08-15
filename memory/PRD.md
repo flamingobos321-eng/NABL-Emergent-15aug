@@ -45,3 +45,19 @@ Implemented Phase-A start: `/api/jobs/{id}/pre-release-check` (completeness chec
 
 ## Test Status
 Core flows re-verified via API after each correction (login, jobs, SRF prepare/send/approve, search, validation 0 FAIL, pre-release, traceability). Calc engine unchanged and still matches Excel exactly.
+
+## Multi-Product Job Refactor (2026-06-15, iteration 6 — DONE)
+Structural paradigm shift completed: a **Calibration Job is now a CONTAINER** (job_no, work_order_ref, customer) holding **multiple products** in an `items[]` array. Each `item` is a fully independent calibration record with its own product_id, serial/tag/SR/part/URL numbers (all manual), certificate_type (NABL/Traceable), dates, template, master_ids, calibration points, computed uncertainty, review, approval, and its **own certificate with a unique verification_id + QR (ONE CERTIFICATE PER PRODUCT — no combined cert)**.
+- Backend: `JobItemIn`/`JobCreate` models; item-scoped routes `/jobs/{jid}/items/{item_id}/(readings|calculate|submit-review|review|reject|approve|cancel-certificate|certificate/pdf|validation|pre-release-check)`; `/jobs/{jid}/items` (add), DELETE item (blocked when certified); SRF stays job-level and lists all products; `/api/verify/{vid}` resolves the correct item; dashboard/search/traceability iterate items.
+- Migration: `migrate_jobs_to_items()` auto-converts legacy single-product jobs into `items[0]` on startup (2 seeded CY jobs migrated, all points/excel_reference/standards preserved).
+- Frontend: NewJob multi-product form ("Add Another Product"), JobDetail product-selector chips + per-product `ItemPanel` (Overview/Readings/Calc/Excel-vs-App/Certificate + workflow bar), SRF multi-product table, Jobs/Dashboard show product counts, `PDF_URL(jid,itemId)`.
+- Verified: 12/12 backend pytest pass, frontend flows pass, calc engine 0 FAIL, distinct verification_id per product.
+
+## Remaining Backlog (post multi-product)
+- P1: Master Certificates file attachment (attach external cal certs to Masters via existing Object Storage).
+- P1: Audit Evidence Package (bundle WO + SRF + calibration records + master certs + audit trail into one download per job).
+- P2: Old-file cleanup in Object Storage when a Document attachment is replaced.
+- P2: Inline attachment preview in document rows.
+- P2: Restore/reactivate archived product or retired master.
+- P2: Equipment usage-history view per Master across jobs.
+- Soft/non-blocking: split server.py (~1382 lines) into routers; batch DB lookups in list_jobs; index `items.certificate.verification_id`.

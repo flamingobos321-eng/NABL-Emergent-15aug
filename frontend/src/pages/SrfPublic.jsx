@@ -51,13 +51,26 @@ export default function SrfPublic() {
             </div>
             <p className="text-sm text-slate-500 mb-4">Please review the calibration request and approve, request a correction, or reject.</p>
 
-            <div className="grid sm:grid-cols-2 gap-3 text-sm mb-5 bg-slate-50 rounded-md p-4">
+            <div className="grid sm:grid-cols-2 gap-3 text-sm mb-4 bg-slate-50 rounded-md p-4">
               <div><span className="text-xs text-slate-500">Customer</span><div className="font-medium">{srf.customer_name}</div></div>
               <div><span className="text-xs text-slate-500">Work Order Ref</span><div className="font-medium font-mono">{srf.work_order_ref || "—"}</div></div>
               <div className="sm:col-span-2"><span className="text-xs text-slate-500">Address</span><div className="font-medium">{srf.address}</div></div>
-              <div><span className="text-xs text-slate-500">Product / Serial</span><div className="font-medium">{srf.product_name} · {srf.serial_number}</div></div>
-              <div><span className="text-xs text-slate-500">Certificate Type</span><div className="font-medium">{srf.certificate_type}</div></div>
-              <div className="sm:col-span-2"><span className="text-xs text-slate-500">Calibration Points (°C)</span><div className="font-mono">{(srf.calibration_points || []).join(", ")}</div></div>
+            </div>
+            <div className="mb-5 rounded-md border border-slate-200 overflow-hidden">
+              <div className="px-3 py-2 bg-slate-100 text-xs uppercase tracking-wide text-slate-500 font-medium">Products in this Work Order</div>
+              <table className="w-full text-sm">
+                <thead className="text-slate-500 text-xs"><tr>{["Product", "Serial", "Type", "Points (°C)"].map((h) => <th key={h} className="text-left px-3 py-1.5 font-medium">{h}</th>)}</tr></thead>
+                <tbody>
+                  {(srf.products || []).map((p, i) => (
+                    <tr key={i} className="border-t" data-testid={`srf-product-${i}`}>
+                      <td className="px-3 py-2 font-medium">{p.product_name}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{p.serial_number || "—"}</td>
+                      <td className="px-3 py-2">{p.certificate_type}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{(p.calibration_points || []).join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
             {srf.lab_notes && <p className="text-xs text-slate-500 mb-4">Lab notes: {srf.lab_notes}</p>}
 
