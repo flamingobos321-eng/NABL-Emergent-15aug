@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 5 tested the Document Control bug fixes: (a) no blank record created on open/cancel of Create dialog, (b) empty submit rejected (400 backend + toast frontend), (c) new 'Obsolete' action on effective/approved docs. Backend: 5/6 pytest tests pass. Frontend: all UI flows pass (dialog does not create record, empty submit blocked, obsolete button visible and triggers backend transition). Discovered one backend defect: manual `status→obsolete` does NOT clear `is_current` (stays True); auto-supersede path via revise→effective correctly sets is_current=False, but the new direct 'Mark Obsolete' path does not.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/documents/{id}/status (status=obsolete)", "issue": "When manually transitioning an effective/approved document to obsolete, response and DB still have is_current=true. Root cause: server.py transition_document builds updates={status,updated_at} and only sets is_current inside the `if target=='effective'` branch. Need `elif target=='obsolete': updates['is_current']=False`. Verified with curl: FTECH04 rev 05 -> status='obsolete', is_current=True. Also visible in UI as 'CURRENT' badge alongside 'OBSOLETE' status label.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Documents list", "issue": "Obsolete rows still show the green 'CURRENT' badge next to revision number because backend leaves is_current=true after manual obsolete transition (see backend critical bug). Once backend is fixed, UI will render correctly.", "selector": "tbody tr .badge", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Create Document dialog", "issues": ["DialogContent missing aria-describedby (console warning) — accessibility nit"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_bugfix_iter5.py", "/app/test_reports/pytest/iter5.xml"],
+  "action_items": [
+    "Fix transition_document: when target=='obsolete', also set is_current=False in updates dict (backend/server.py ~line 932-940).",
+    "Restore seed data: I inadvertently marked FTECH04 rev 05 as obsolete while testing the Obsolete button (there was no other seeded effective doc besides QM-01/WI-TECH11/FTECH22 exposed to the test). Please revert FTECH04 rev 05 back to status='effective', is_current=True, or reseed. Also created TEST-BUG5-* and TEST-BUG5R-* records that can be cleaned up.",
+    "Optional: add aria-describedby to DialogContent to silence a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py transition_document only manages is_current in the 'effective' branch; obsolete branch is incomplete.",
+    "No auto-cleanup for TEST_ prefixed documents; tests create real records via public API.",
+    "Documents.jsx line ~145 uses window.confirm — functional but not accessible/testable via role dialog; consider AlertDialog for consistency."
+  ],
+  "updated_files": ["/app/backend/tests/test_bugfix_iter5.py"],
+  "success_rate": {"backend": "83% (5/6)", "frontend": "100% (all target flows pass)"},
+  "test_credentials": "quality@yog.local / Quality@2026 (verified working)",
+  "seed_data_creation": "Created TEST-BUG5-<rand> and TEST-BUG5R-<rand> documents for lifecycle+revise tests. FTECH04 rev 05 was flipped to obsolete during UI test (needs restore).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fix is a 1-line change (add is_current=False for obsolete target). After fix, re-run pytest /app/backend/tests/test_bugfix_iter5.py — the test_full_lifecycle_and_manual_obsolete case will pass. Also verify UI: the CURRENT badge should disappear from a manually-obsoleted row. Restore FTECH04 seed doc.",
+  "rca_of_the_issue": "Root cause: transition_document initializes updates without is_current, then only conditionally sets is_current=True for target='effective'. The auto-supersede sibling-update inside the 'effective' branch correctly sets is_current=False for previously-effective siblings, which masked this bug in the revise flow. The newly-added manual 'Mark Obsolete' path never touches is_current, so status becomes 'obsolete' while is_current stays True — producing the visual anomaly of 'CURRENT' + 'OBSOLETE' badges together. Mitigation: `elif target=='obsolete': updates['is_current']=False` (and optionally set superseded_by=None or a marker)."
+}

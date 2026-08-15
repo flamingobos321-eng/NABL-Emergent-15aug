@@ -60,6 +60,7 @@ export default function Documents() {
   useEffect(() => { load(); }, [fCat, fStatus]);
 
   const create = async () => {
+    if (!form.doc_number.trim() || !form.title.trim()) return toast.error("Document Number and Title are required");
     try { await api.post("/documents", form); toast.success("Document created (draft)"); setOpen(false); setForm(EMPTY); load(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };

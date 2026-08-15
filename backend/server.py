@@ -896,6 +896,8 @@ async def list_documents(category: Optional[str] = None, status: Optional[str] =
 
 @api.post("/documents")
 async def create_document(body: DocumentIn, user=Depends(require("admin", "quality"))):
+    if not body.doc_number.strip() or not body.title.strip():
+        raise HTTPException(status_code=400, detail="Document Number and Title are required")
     if await db.documents.find_one({"doc_number": body.doc_number, "revision": body.revision}):
         raise HTTPException(status_code=400, detail="This document number + revision already exists")
     doc = {**body.model_dump(), "status": "draft", "is_current": False, "superseded_by": None,
@@ -935,6 +937,8 @@ async def transition_document(did: str, body: DocStatusIn, user=Depends(require(
         await db.documents.update_many(
             {"doc_number": d["doc_number"], "status": "effective", "_id": {"$ne": ObjectId(did)}},
             {"$set": {"status": "obsolete", "is_current": False, "superseded_by": d.get("revision")}})
+    elif target == "obsolete":
+        updates["is_current"] = False
     await db.documents.update_one({"_id": ObjectId(did)}, {
         "$set": updates,
         "$push": {"history": {"action": f"status → {target}", "by": user["name"], "at": now_iso(), "note": body.note}}})
