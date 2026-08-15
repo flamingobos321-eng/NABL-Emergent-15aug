@@ -102,6 +102,10 @@ class ProductIn(BaseModel):
     make: str = ""
     range: str = ""
     description: str = ""
+    serial_number: str = ""
+    tag_number: str = ""
+    reference_no: str = ""
+    specification: str = ""
 
 
 class MasterIn(BaseModel):
@@ -119,6 +123,12 @@ class MasterIn(BaseModel):
     traceability: str = ""
     uncertainty: float = 0.0
     status: str = "active"
+    location: str = ""
+    remarks: str = ""
+
+
+class DeleteIn(BaseModel):
+    reason: str = ""
 
 
 class ComponentIn(BaseModel):
@@ -284,14 +294,20 @@ async def update_customer(cid: str, body: CustomerIn, user=Depends(require("admi
 
 
 @api.get("/products")
-async def list_products(customer_id: Optional[str] = None, user=Depends(current_user)):
+async def list_products(customer_id: Optional[str] = None, include_archived: bool = False, user=Depends(current_user)):
     q = {"customer_id": customer_id} if customer_id else {}
+    if not include_archived:
+        q["status"] = {"$ne": "archived"}
     return [clean(p) for p in await db.products.find(q).to_list(1000)]
 
 
 @api.post("/products")
 async def create_product(body: ProductIn, user=Depends(require("admin", "technician"))):
-    doc = {**body.model_dump(), "created_at": now_iso()}
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Product name is required")
+    if not body.customer_id.strip():
+        raise HTTPException(status_code=400, detail="Customer is required")
+    doc = {**body.model_dump(), "status": "active", "created_at": now_iso()}
     res = await db.products.insert_one(doc)
     await audit("product", res.inserted_id, "create", user, new=body.name)
     return clean(await db.products.find_one({"_id": res.inserted_id}))
@@ -299,13 +315,30 @@ async def create_product(body: ProductIn, user=Depends(require("admin", "technic
 
 @api.put("/products/{pid}")
 async def update_product(pid: str, body: ProductIn, user=Depends(require("admin", "technician"))):
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Product name is required")
+    old = await db.products.find_one({"_id": ObjectId(pid)})
     await db.products.update_one({"_id": ObjectId(pid)}, {"$set": body.model_dump()})
-    await audit("product", pid, "update", user)
+    await audit("product", pid, "update", user, old=(old or {}).get("name"), new=body.name)
     return clean(await db.products.find_one({"_id": ObjectId(pid)}))
+
+
+@api.delete("/products/{pid}")
+async def delete_product(pid: str, user=Depends(require("admin", "technician"))):
+    used = await db.jobs.count_documents({"product_id": pid})
+    if used > 0:
+        await db.products.update_one({"_id": ObjectId(pid)}, {"$set": {"status": "archived"}})
+        await audit("product", pid, "archive", user, reason=f"Used in {used} job(s) — archived, not deleted")
+        return {"archived": True, "message": "Product is used in calibration records; it was archived (not deleted) to preserve history."}
+    await db.products.delete_one({"_id": ObjectId(pid)})
+    await audit("product", pid, "delete", user, reason="Unused product deleted")
+    return {"archived": False, "message": "Product deleted."}
 
 
 # ---------------- Masters ----------------
 def master_status(m):
+    if m.get("status") in ("retired", "inactive", "out_of_service"):
+        return m.get("status")
     due = m.get("cal_due_date")
     if not due:
         return "unknown"
@@ -333,6 +366,8 @@ async def list_masters(user=Depends(current_user)):
 
 @api.post("/masters")
 async def create_master(body: MasterIn, user=Depends(require("admin", "technician"))):
+    if not body.master_id.strip() or not body.name.strip():
+        raise HTTPException(status_code=400, detail="Master ID and Instrument name are required")
     doc = {**body.model_dump(), "created_at": now_iso()}
     res = await db.masters.insert_one(doc)
     await audit("master", res.inserted_id, "create", user, new=body.master_id)
@@ -345,6 +380,23 @@ async def update_master(mid: str, body: MasterIn, user=Depends(require("admin", 
     await db.masters.update_one({"_id": ObjectId(mid)}, {"$set": body.model_dump()})
     await audit("master", mid, "update", user, old=(old or {}).get("cal_due_date"), new=body.cal_due_date)
     return clean(await db.masters.find_one({"_id": ObjectId(mid)}))
+
+
+@api.delete("/masters/{mid}")
+async def delete_master(mid: str, user=Depends(require("admin", "technician"))):
+    m = await db.masters.find_one({"_id": ObjectId(mid)})
+    if not m:
+        raise HTTPException(status_code=404, detail="Master not found")
+    used = await db.jobs.count_documents({"master_ids": m.get("master_id")})
+    if used > 0:
+        await db.masters.update_one({"_id": ObjectId(mid)}, {"$set": {"status": "retired"}})
+        await audit("master", mid, "retire", user, old=m.get("status"), new="retired",
+                    reason=f"Used in {used} calibration(s) — retired, not deleted")
+        return {"archived": True, "message": "Master is used in calibration records; it was marked Retired (not deleted) to preserve history."}
+    await db.masters.delete_one({"_id": ObjectId(mid)})
+    await audit("master", mid, "delete", user, reason="Unused master deleted")
+    return {"archived": False, "message": "Master deleted."}
+
 
 
 # ---------------- Templates ----------------

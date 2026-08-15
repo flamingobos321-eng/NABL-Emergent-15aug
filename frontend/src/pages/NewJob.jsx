@@ -48,6 +48,16 @@ export default function NewJob() {
 
   const templateComponents = () => templates.find((x) => x.code === f.template_code)?.components || [];
 
+  const chooseProduct = (pid) => {
+    const p = products.find((x) => x.id === pid);
+    setF((s) => ({
+      ...s, product_id: pid,
+      serial_number: p?.serial_number || s.serial_number,
+      tag_number: p?.tag_number || s.tag_number,
+      cert_no: p?.reference_no || s.cert_no,
+    }));
+  };
+
   const addPoint = () => setPoints([...points, {
     point_label: "", nominal: 0, master_readings: [0, 0, 0, 0, 0], uut_readings: [0, 0, 0, 0, 0],
     point_deviation: 0, cmc_floor: "", components: templateComponents(),
@@ -93,7 +103,7 @@ export default function NewJob() {
             </div>
             <div>
               <Label>Product</Label>
-              <Select value={f.product_id} onValueChange={(v) => setF({ ...f, product_id: v })}>
+              <Select value={f.product_id} onValueChange={chooseProduct}>
                 <SelectTrigger data-testid="job-product"><SelectValue placeholder="Select product" /></SelectTrigger>
                 <SelectContent>{products.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} ({p.type})</SelectItem>)}</SelectContent>
               </Select>
