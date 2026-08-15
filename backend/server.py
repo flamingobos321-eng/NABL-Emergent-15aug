@@ -102,7 +102,6 @@ class ProductIn(BaseModel):
     serial_number: str = ""
     tag_number: str = ""
     reference_no: str = ""
-    ulr_no: str = ""
     specification: str = ""
 
 
@@ -160,8 +159,6 @@ class JobItemIn(BaseModel):
     sr_number: str = ""
     part_number: str = ""
     url_number: str = ""
-    cert_no: str = ""
-    ulr_no: str = ""
     certificate_type: str = "NABL"
     method: str = "WI \u2013 TECH/11"
     reference_standard: str = ""
@@ -442,6 +439,13 @@ def next_cal_date(cal_date):
         return ""
 
 
+async def gen_cert_no(item):
+    """Certificate number is assigned at issuance (never at job/product creation)."""
+    tag = "NABL" if str(item.get("certificate_type", "NABL")).upper() == "NABL" else "TRC"
+    year = datetime.now(timezone.utc).year
+    return f"YEP/{tag}/{year}/{await next_seq('cert'):05d}"
+
+
 STATUS_ORDER = ["draft", "readings_entered", "calculated", "in_review", "reviewed", "certified"]
 
 
@@ -469,8 +473,7 @@ async def build_item(data: dict):
         "sr_number": data.get("sr_number", ""),
         "part_number": data.get("part_number", ""),
         "url_number": data.get("url_number", ""),
-        "cert_no": data.get("cert_no", ""),
-        "ulr_no": data.get("ulr_no", ""),
+        "cert_no": "",
         "certificate_type": data.get("certificate_type", "NABL"),
         "method": data.get("method", "WI \u2013 TECH/11"),
         "reference_standard": data.get("reference_standard", ""),
@@ -690,7 +693,9 @@ async def approve_item(jid: str, item_id: str, user=Depends(require("admin", "si
         if m and master_status(m) == "expired":
             raise HTTPException(status_code=400, detail=f"Master {mid} calibration expired; cannot approve")
     verify_id = uuid.uuid4().hex[:12]
-    cert = {"cert_no": it.get("cert_no"), "ulr_no": it.get("ulr_no"),
+    cert_no = it.get("cert_no") or await gen_cert_no(it)
+    it["cert_no"] = cert_no
+    cert = {"cert_no": cert_no, "ulr_no": it.get("url_number"),
             "verification_id": verify_id, "issued_date": now_iso(),
             "issued_by": user["name"], "status": "issued"}
     it["status"] = "certified"
@@ -720,7 +725,8 @@ async def cert_pdf(jid: str, item_id: str, user=Depends(current_user)):
     cust = await db.customers.find_one({"_id": ObjectId(j["customer_id"])})
     prod = await db.products.find_one({"_id": ObjectId(it["product_id"])}) if it.get("product_id") else None
     results = compute_points(it.get("points", []))
-    pdf_job = {**it, "job_no": j.get("job_no"), "work_order_ref": j.get("work_order_ref")}
+    pdf_job = {**it, "job_no": j.get("job_no"), "work_order_ref": j.get("work_order_ref"),
+               "cert_no": it.get("cert_no"), "ulr_no": it.get("url_number")}
     verify_url = f"{os.environ.get('FRONTEND_URL','')}/verify/{it['certificate']['verification_id']}"
     pdf = build_certificate_pdf(pdf_job, clean(cust) if cust else {}, clean(prod) if prod else {}, results,
                                 verify_url, cert_type=it.get("certificate_type", "NABL"))
@@ -1225,9 +1231,8 @@ async def migrate_jobs_to_items():
             "tag_number": j.get("tag_number", ""),
             "sr_number": j.get("sr_number", ""),
             "part_number": j.get("part_number", ""),
-            "url_number": j.get("url_number", ""),
+            "url_number": j.get("url_number") or j.get("ulr_no", ""),
             "cert_no": j.get("cert_no", ""),
-            "ulr_no": j.get("ulr_no", ""),
             "certificate_type": j.get("certificate_type", "NABL"),
             "method": j.get("method", "WI \u2013 TECH/11"),
             "reference_standard": j.get("reference_standard", ""),
@@ -1253,6 +1258,26 @@ async def migrate_jobs_to_items():
         migrated += 1
     if migrated:
         logger.info(f"Migrated {migrated} legacy job(s) into multi-product structure")
+
+
+async def consolidate_url_field():
+    """Merge legacy per-item `ulr_no` into the single `url_number` field and drop `ulr_no`."""
+    fixed = 0
+    async for j in db.jobs.find({}):
+        items = j.get("items", [])
+        changed = False
+        for it in items:
+            if not it.get("url_number") and it.get("ulr_no"):
+                it["url_number"] = it.get("ulr_no")
+                changed = True
+            if "ulr_no" in it:
+                it.pop("ulr_no", None)
+                changed = True
+        if changed:
+            await db.jobs.update_one({"_id": j["_id"]}, {"$set": {"items": items}})
+            fixed += 1
+    if fixed:
+        logger.info(f"Consolidated ulr_no -> url_number on {fixed} job(s)")
 
 
 # ---------------- Seeding ----------------
@@ -1293,6 +1318,7 @@ async def seed():
 
     if await db.jobs.count_documents({}) > 0:
         await migrate_jobs_to_items()
+        await consolidate_url_field()
         return
 
     with open(ROOT_DIR / "seed_data.json") as f:
@@ -1330,9 +1356,8 @@ async def seed():
             "tag_number": j.get("tag_number", ""),
             "sr_number": j.get("sr_number", ""),
             "part_number": j.get("part_number", ""),
-            "url_number": j.get("url_number", ""),
+            "url_number": j.get("url_number") or j.get("ulr_no", ""),
             "cert_no": j.get("cert_no", ""),
-            "ulr_no": j.get("ulr_no", ""),
             "certificate_type": j.get("certificate_type", "NABL"),
             "method": j.get("method", "WI \u2013 TECH/11"),
             "reference_standard": j.get("reference_standard", ""),

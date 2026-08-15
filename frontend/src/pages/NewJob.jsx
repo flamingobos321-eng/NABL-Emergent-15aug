@@ -16,7 +16,7 @@ import { Plus, Trash2, Package } from "lucide-react";
 const newItem = () => ({
   product_id: "", serial_number: "", tag_number: "",
   sr_number: "", part_number: "", url_number: "",
-  cert_no: "", ulr_no: "", certificate_type: "NABL",
+  certificate_type: "NABL",
   cal_date: "", issue_date: "", item_received_date: "",
   template_code: "", reference_standard: "", method: "WI – TECH/11",
   master_ids: [], points: [],
@@ -145,8 +145,6 @@ export default function NewJob() {
                   <SelectContent><SelectItem value="NABL">NABL</SelectItem><SelectItem value="Traceable">Traceable</SelectItem></SelectContent>
                 </Select>
               </div>
-              <div><Label>Certificate No.</Label><Input value={it.cert_no} onChange={(e) => patchItem(i, { cert_no: e.target.value })} /></div>
-              <div><Label>ULR No.</Label><Input value={it.ulr_no} onChange={(e) => patchItem(i, { ulr_no: e.target.value })} /></div>
               <div><Label>Calibration Date</Label><Input type="date" data-testid={`item-caldate-${i}`} value={it.cal_date} onChange={(e) => patchItem(i, { cal_date: e.target.value })} /></div>
               <div><Label>Issue Date</Label><Input type="date" value={it.issue_date} onChange={(e) => patchItem(i, { issue_date: e.target.value })} /></div>
               <div><Label>Item Received Date</Label><Input type="date" value={it.item_received_date} onChange={(e) => patchItem(i, { item_received_date: e.target.value })} /></div>

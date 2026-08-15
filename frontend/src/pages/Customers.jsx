@@ -11,7 +11,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Plus, Package, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-const EMPTY_PROD = { name: "", type: "", make: "", range: "", description: "", serial_number: "", tag_number: "", reference_no: "", ulr_no: "" };
+const EMPTY_PROD = { name: "", type: "", make: "", range: "", description: "", serial_number: "", tag_number: "", reference_no: "" };
 
 export default function Customers() {
   const { user } = useAuth();
@@ -48,7 +48,7 @@ export default function Customers() {
   const openNewProduct = (cid) => { setPform(EMPTY_PROD); setProdDialog({ customerId: cid, editingId: null }); };
   const openEditProduct = (cid, p) => {
     setPform({ name: p.name || "", type: p.type || "", make: p.make || "", range: p.range || "",
-      description: p.description || "", serial_number: p.serial_number || "", tag_number: p.tag_number || "", reference_no: p.reference_no || "", ulr_no: p.ulr_no || "" });
+      description: p.description || "", serial_number: p.serial_number || "", tag_number: p.tag_number || "", reference_no: p.reference_no || "" });
     setProdDialog({ customerId: cid, editingId: p.id });
   };
   const cancelProduct = () => { setProdDialog(null); setPform(EMPTY_PROD); };
@@ -122,9 +122,6 @@ export default function Customers() {
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Range</Label><Input placeholder="0 to 800 °C" value={pform.range} onChange={(e) => setPform({ ...pform, range: e.target.value })} /></div>
               <div><Label>Reference / Cert No.</Label><Input data-testid="product-refno" value={pform.reference_no} onChange={(e) => setPform({ ...pform, reference_no: e.target.value })} /></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>ULR No.</Label><Input data-testid="product-ulr" value={pform.ulr_no} onChange={(e) => setPform({ ...pform, ulr_no: e.target.value })} /></div>
             </div>
           </div>
           <DialogFooter>

@@ -240,7 +240,7 @@ function ItemPanel({ jobId, item, job, user, onReload, onRemove }) {
                 {[
                   ["Serial No.", item.serial_number], ["Tag No.", item.tag_number],
                   ["SR Number", item.sr_number], ["Part Number", item.part_number], ["URL Number", item.url_number],
-                  ["Certificate No.", item.cert_no], ["ULR No.", item.ulr_no],
+                  ["Certificate No.", item.cert_no || "— (assigned at issuance)"],
                   ["Certificate Type", item.certificate_type || "NABL"],
                   ["Method", item.method], ["Reference Standard", item.reference_standard],
                   ["Calibration Date", fmtDate(item.cal_date)], ["Issue Date", fmtDate(item.issue_date)],
